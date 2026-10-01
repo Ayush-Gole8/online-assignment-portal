@@ -1,0 +1,7 @@
+This file exists only so that Git tracks an otherwise empty directory.
+
+`templates/` is the Thymeleaf view root (application-structure.md §2). It is empty in this
+milestone because no controller or view has been written yet, and an empty directory cannot
+be committed.
+
+Delete this file the moment the first template lands.
