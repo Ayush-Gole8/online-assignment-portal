@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--
+  The signed-in header bar, shared by every authenticated page.
+
+  A fragment rather than four copies. The sign-out control is the reason: it is a POST
+  form, it needs a CSRF token, and it must carry the same URL everywhere. Four copies
+  of that is four places to get it wrong — and getting it wrong produces a 403 on a
+  button that looks fine.
+
+  Used as:  <header th:replace="~{fragments/portal-header :: header}"></header>
+
+  Expects `currentUser` in the model, which is a CurrentUserView — an email and a role,
+  never the User entity. Every controller that renders a page behind authentication
+  puts it there: HomeController explicitly, SubmissionController via a
+  @ModelAttribute method.
+
+  Signing out is a POST, not a link, for two reasons that reinforce each other: logout
+  changes server-side state, and a GET logout can be fired by an <img> tag on any
+  third-party page. As with the other forms in this application, th:action is what
+  causes Thymeleaf to inject the CSRF token — a plain action attribute would yield a 403.
+-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fragment</title>
+</head>
+<body>
+
+<header class="bar" th:fragment="header">
+    <a class="brand" th:href="@{/}">Online Assignment Portal</a>
+
+    <nav class="inline">
+        <a th:href="@{/submissions}">My submissions</a>
+        <a th:href="@{/submissions/new}">Upload</a>
+    </nav>
+
+    <form th:action="@{/logout}" method="post" class="inline">
+        <span class="who" th:text="${currentUser.email}">signed-in@example.com</span>
+        <button type="submit" class="link-button">Sign out</button>
+    </form>
+</header>
+
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<!--
+  The student's own submissions.
+
+  `submissions` is a List<SubmissionSummary> — read models, never Submission entities.
+  The entity carries a studentId and a storedFileName; a read model carries what is
+  being shown and nothing else (docs/architecture/application-structure.md §6).
+
+  The list contains only the signed-in student's rows, and that is enforced by the query
+  in SubmissionRepository rather than by a filter here. A template cannot leak a row it
+  was never given.
+-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>My submissions — Online Assignment Portal</title>
+    <link rel="stylesheet" th:href="@{/css/portal.css}">
+</head>
+<body>
+
+<header th:replace="~{fragments/portal-header :: header}"></header>
+
+<main class="card card-wide">
+    <h1>My submissions</h1>
+
+    <p class="muted" th:if="${#lists.isEmpty(submissions)}">
+        You have not submitted anything yet.
+    </p>
+
+    <table class="listing" th:unless="${#lists.isEmpty(submissions)}">
+        <thead>
+        <tr>
+            <th scope="col">Title</th>
+            <th scope="col">Course</th>
+            <th scope="col">File</th>
+            <th scope="col">Status</th>
+            <th scope="col">Submitted</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="submission : ${submissions}">
+            <td>
+                <!-- The link carries only the identifier, and the detail handler looks the
+                     row up BY OWNER. Changing this value in the address bar to somebody
+                     else's identifier produces a 404, not their submission. -->
+                <a th:href="@{/submissions/{id}(id=${submission.id})}"
+                   th:text="${submission.title}">Coursework</a>
+            </td>
+            <td th:text="${submission.courseCode}">CS101</td>
+            <!-- The name the student's own machine used. Display only: the file on the
+                 volume is stored under a generated identifier. -->
+            <td th:text="${submission.originalFileName}">essay.pdf</td>
+            <td>
+                <!-- One ${...} expression rather than a literal concatenated with a variable:
+                     Thymeleaf's `+` operator only applies between expressions, not between a
+                     quoted string and a `${...}`, so the whole value is computed inside the
+                     expression. name() is called explicitly because the enum would otherwise
+                     render through its default toString. -->
+                <span class="status"
+                      th:classappend="${'status-' + #strings.toLowerCase(submission.status.name())}"
+                      th:text="${submission.status}">SUBMITTED</span>
+            </td>
+            <td th:text="${submission.submittedOn()}">1 Oct 2026, 09:15 UTC</td>
+        </tr>
+        </tbody>
+    </table>
+
+    <p><a class="button-link" th:href="@{/submissions/new}">Upload another</a></p>
+</main>
+
+</body>
+</html>

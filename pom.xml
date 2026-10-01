@@ -129,10 +129,19 @@
     </dependency>
 
     <!--
-      The Spring Security test support: `csrf()`, `user(...)`, `@WithMockUser`, and the
-      SecurityMockMvcConfigurer that applies the real filter chain under MockMvc. Without it
-      the security tests would have to hand-place an Authentication into the SecurityContext,
-      which tests the test rather than the configuration (docs/testing/strategy.md §3.3).
+      The Spring Security test support: `csrf()` and the SecurityMockMvcConfigurer that
+      applies the real filter chain under MockMvc. Without it the security tests would have
+      to hand-place an Authentication into the SecurityContext, which tests the test rather
+      than the configuration (docs/testing/strategy.md §3.3).
+
+      One correction worth recording, because this comment previously claimed otherwise:
+      SecurityMockMvcRequestPostProcessors has no `user(UserDetails)` overload on Spring
+      Security 7.1.1 — the compiler rejects it. `csrf()` from the same class resolves, so
+      the dependency is right; the method simply is not there. AuthorizationIT therefore
+      signs in for real, posting credentials to /login and reusing the session that comes
+      back. That is the better test anyway: it exercises DatabaseUserDetailsService, the
+      Role enum, and `hasRole(...)` end to end instead of handing the filter chain an
+      authority it did not produce.
     -->
     <dependency>
       <groupId>org.springframework.security</groupId>

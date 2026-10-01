@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<!--
+  One submission, as its owner sees it.
+
+  `submission` is a SubmissionDetail — a read model. It deliberately does NOT include the
+  stored file name: that identifier is how the storage layer addresses the bytes, and
+  showing one student their own is harmless but tells them nothing, while showing it to
+  the wrong person would hand them a way to ask for the file directly.
+
+  The checksum IS shown, because it is the student's own evidence that the artefact that
+  was stored is the artefact they uploaded.
+
+  Model attributes:
+    currentUser  CurrentUserView     — for the header fragment
+    submission   SubmissionDetail
+    submitted    String              — a flash attribute, present only after an upload
+-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="${submission.title} + ' — Online Assignment Portal'">Submission</title>
+    <link rel="stylesheet" th:href="@{/css/portal.css}">
+</head>
+<body>
+
+<header th:replace="~{fragments/portal-header :: header}"></header>
+
+<main class="card card-wide">
+
+    <!-- A flash attribute, so it appears once after the redirect from the upload and is
+         gone on a refresh. Reloading this page does not re-upload anything. -->
+    <p class="notice notice-success" th:if="${submitted}" role="status">
+        <span th:text="${submitted}">essay.pdf</span> was submitted for review.
+    </p>
+
+    <h1 th:text="${submission.title}">Coursework</h1>
+    <p class="subtitle" th:text="${submission.courseCode}">CS101</p>
+
+    <p>
+        <span class="status"
+              th:classappend="${'status-' + #strings.toLowerCase(submission.status.name())}"
+              th:text="${submission.status}">SUBMITTED</span>
+    </p>
+
+    <h2>The file</h2>
+    <dl class="facts">
+        <dt>Original name</dt>
+        <dd th:text="${submission.originalFileName}">essay.pdf</dd>
+
+        <dt>Type</dt>
+        <dd th:text="${submission.contentType}">application/pdf</dd>
+
+        <dt>Size</dt>
+        <dd th:text="${submission.readableSize()}">1.5 MB</dd>
+
+        <!-- The digest of the bytes as they were stored. Lowercase hex, computed from the
+             same array that was written to the volume. -->
+        <dt>SHA-256</dt>
+        <dd><code class="checksum" th:text="${submission.checksumSha256}">9f86d081…</code></dd>
+    </dl>
+
+    <h2>History</h2>
+    <dl class="facts">
+        <dt>Submitted</dt>
+        <dd th:text="${submission.submittedOn()}">1 Oct 2026, 09:15 UTC</dd>
+
+        <dt>Last changed</dt>
+        <dd th:text="${submission.lastChangedOn()}">1 Oct 2026, 09:15 UTC</dd>
+
+        <dt>Reviewed</dt>
+        <!-- Empty until a reviewer decides, which nothing does in this milestone. The
+             template supplies the phrase rather than the formatter, so "no value yet" stays
+             a presentation decision. -->
+        <dd th:if="${!#strings.isEmpty(submission.reviewedOn())}"
+            th:text="${submission.reviewedOn()}">2 Oct 2026, 11:00 UTC</dd>
+        <dd th:if="${#strings.isEmpty(submission.reviewedOn())}" class="muted">
+            Not yet reviewed
+        </dd>
+    </dl>
+
+    <!-- Renders only once a reviewer has refused the work. Unreachable in this milestone:
+         there is no review feature, and an upload can only be SUBMITTED. The block is here
+         because the column exists and the alternative is a rejection reason recorded and
+         never shown. -->
+    <div th:if="${submission.rejectionReason != null}">
+        <h2>Reason for rejection</h2>
+        <p class="notice notice-error" th:text="${submission.rejectionReason}">
+            The submitted file was not a readable PDF.
+        </p>
+    </div>
+
+    <p><a class="button-link" th:href="@{/submissions}">Back to my submissions</a></p>
+</main>
+
+</body>
+</html>

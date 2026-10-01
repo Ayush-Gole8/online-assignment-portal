@@ -54,10 +54,21 @@ spring:
 
   # Uploads are capped at 10 MB in the MVP (FR-7). Rejecting oversized multipart requests
   # here stops them before a byte reaches application code.
+  #
+  # The two limits are deliberately NOT the same number. `max-file-size` is the real
+  # limit and matches FileValidationService.MAX_FILE_SIZE_BYTES exactly. `max-request-size`
+  # is larger, because it caps the whole multipart envelope — the boundaries, the form
+  # fields, and the file together. Setting it to exactly 10MB would reject a legitimate
+  # 10MB file on the strength of the few hundred bytes of envelope around it, and the user
+  # would be told their file was too large when it was not.
+  #
+  # Both are a backstop, not the control: FileValidationService enforces the same limit in
+  # application code, where it can produce a message. The container's limit exists so that
+  # an oversized request is refused without being buffered (CLAUDE.md §7 rule 4).
   servlet:
     multipart:
       max-file-size: 10MB
-      max-request-size: 10MB
+      max-request-size: 11MB
 
 # ---------------------------------------------------------------------------
 # Operability — the delivery pipeline's health-check and rollback stages depend
@@ -112,8 +123,11 @@ app:
     # directory so a developer needs no configuration; deployed environments set
     # UPLOAD_STORAGE_PATH to the mounted volume.
     #
-    # No code binds this yet — it is declared now so the externalised configuration
-    # contract is fixed before the storage capability is implemented.
+    # Bound by storage.StorageProperties and consumed by storage.StorageService. This
+    # path is NOT servable: nothing maps it to a URL, and no static-resource handler
+    # points at it, so an artefact can only be reached through an endpoint that checks
+    # who is asking. `src/main/resources/static` is where servable files live and where
+    # uploads must never be written (CLAUDE.md §7 rule 7).
     root: ${UPLOAD_STORAGE_PATH:./uploads}
 
   seed:

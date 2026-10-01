@@ -44,7 +44,7 @@ CREATE TABLE users
     -- Stored as VARCHAR(36) rather than BINARY(16). The 20 bytes saved per row
     -- are worth less here than being able to read an identifier in a SELECT, a
     -- schema dump, or a pipeline log without a decoding step. The mapping is
-    -- pinned by auth/UuidToVarcharConverter, so this column's type is the
+    -- pinned by common/UuidToVarcharConverter, so this column's type is the
     -- migration's decision rather than the ORM's — Hibernate's default UUID
     -- representation for MySQL has changed between major versions, and
     -- `ddl-auto: validate` turns that kind of surprise into a startup failure.

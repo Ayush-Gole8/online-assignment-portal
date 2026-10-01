@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<!--
+  The upload form.
+
+  Two attributes on the form are load-bearing:
+
+  * `enctype="multipart/form-data"`. Without it the browser sends only the file's
+    NAME as a text field and the upload silently becomes a request with no file part.
+    The validator would then refuse it with "Choose a PDF to upload", which is
+    technically true and completely unhelpful.
+
+  * `th:action` and not `action`. Thymeleaf's Spring Security integration hooks the
+    form's action attribute and injects the CSRF token. A plain `action="/submissions"`
+    produces a form with no token, and the POST is refused with a 403 before it reaches
+    the controller.
+
+  The `accept` attribute on the file input is a convenience, not a control: it filters
+  the file picker, and a request crafted by hand ignores it entirely. Every rule it
+  implies is enforced again on the server, by FileValidationService, which is the only
+  place the decision is actually made (CLAUDE.md §7 rule 4).
+
+  Model attributes:
+    currentUser  CurrentUserView  — for the header fragment
+    error        String           — a flash attribute, present only after a refusal
+    title        String           — a flash attribute, so a refusal does not discard
+    courseCode   String             what the student typed
+-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Upload a submission — Online Assignment Portal</title>
+    <link rel="stylesheet" th:href="@{/css/portal.css}">
+</head>
+<body>
+
+<header th:replace="~{fragments/portal-header :: header}"></header>
+
+<main class="card card-wide">
+    <h1>Upload a submission</h1>
+    <p class="subtitle">PDF only, up to 10 MB.</p>
+
+    <!-- Present only after a refused upload. The message comes from the service and is
+         always a complete sentence written by this application; no text the student
+         supplied and no filesystem path ever reaches it (CLAUDE.md §7 rule 11). -->
+    <p class="notice notice-error" th:if="${error}" role="alert" th:text="${error}">
+        The file is larger than the 10 MB limit.
+    </p>
+
+    <form th:action="@{/submissions}" method="post" enctype="multipart/form-data">
+
+        <label for="title">Title</label>
+        <input type="text"
+               id="title"
+               name="title"
+               maxlength="200"
+               th:value="${title}"
+               autofocus
+               required>
+
+        <label for="courseCode">Course code</label>
+        <input type="text"
+               id="courseCode"
+               name="courseCode"
+               maxlength="20"
+               th:value="${courseCode}"
+               required>
+
+        <label for="file">PDF file</label>
+        <input type="file"
+               id="file"
+               name="file"
+               accept="application/pdf,.pdf"
+               required>
+
+        <button type="submit">Submit for review</button>
+    </form>
+
+    <p class="muted">
+        Submitting records the file exactly as uploaded, with a SHA-256 checksum, and
+        starts it in the SUBMITTED state.
+    </p>
+
+    <p><a class="button-link" th:href="@{/submissions}">Back to my submissions</a></p>
+</main>
+
+</body>
+</html>

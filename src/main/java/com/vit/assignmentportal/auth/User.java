@@ -2,7 +2,6 @@ package com.vit.assignmentportal.auth;
 
 import com.vit.assignmentportal.common.Role;
 import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -13,6 +12,8 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * A portal user: the identity behind every request (data-model.md §2).
@@ -36,13 +37,20 @@ public class User {
      * back after it, so a saved user always has an id and there is no window in which the entity
      * is persisted but unidentifiable.
      *
-     * <p>{@link UuidToVarcharConverter} makes the column type the migration's decision rather
+     * <p>{@link JdbcTypeCode} pins the column type, so it stays the migration's decision rather
      * than the ORM's. Hibernate's own representation of {@code java.util.UUID} has changed
      * between major versions, and with {@code ddl-auto: validate} (ADR-003) a mismatch between
      * its default and {@code VARCHAR(36)} is a startup failure.
+     *
+     * <p>An {@code AttributeConverter} would have been the other way to pin it, and is what the
+     * sibling {@code UUID} columns use. It cannot be used here: Hibernate 7 rejects a converter
+     * on an identifier attribute with {@code AnnotationException: 'AttributeConverter' not
+     * allowed for attribute 'id' annotated '@jakarta.persistence.Id'}, and the entity manager
+     * factory then fails to build at all. Stating the JDBC type reaches the same end and is
+     * permitted on an {@code @Id}.
      */
     @Id
-    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.VARCHAR)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "id", nullable = false, updatable = false, length = 36)
     private UUID id;
 

@@ -1,6 +1,7 @@
 # Toolchain
 
-**Status:** Partially recorded — repository-declared versions captured; local machine versions still unverified
+**Status:** Partially recorded — versions used by the last recorded build are captured; the
+tool-version rows marked *unverified* have still not been checked on this machine
 **Related:** [CLAUDE.md §3](../../CLAUDE.md) · [Contribution workflow](../../CONTRIBUTING.md)
 
 ---
@@ -26,8 +27,9 @@ Until a row is filled in, treat it as **unverified** and do not claim the prereq
 > - **Declared** — read out of `pom.xml` or `deploy/docker-compose.yml`. This is a fact about
 >   the repository, verified by inspection.
 > - **Unverified** — the version a resolving build or a local machine would report. **Not yet
->   established**, because `./mvnw clean verify` and the tool-version commands have not been
->   run on this machine.
+>   established**, because the tool-version commands have not been run on this machine. A build
+>   *has* run — see §9 — but it recorded the versions of the tools it loaded, not the version of
+>   every tool listed below.
 >
 > A declared version is not proof the build resolves it. Fill in the unverified rows before
 > claiming any prerequisite is met.
@@ -37,7 +39,7 @@ Until a row is filled in, treat it as **unverified** and do not claim the prereq
 | Tool | Required | Verification command | Actual version | Verified | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Java (JDK) | 21 (LTS) | `mvn -version` | **21.0.12.1** (Eclipse Adoptium) — **in use** | 2026-10-01 | The build log shows `Starting ApplicationContextIT using Java 21.0.12.1`, and `javac [debug parameters release 21]` confirms the bytecode target. Selected by `JAVA_HOME`; the JDK 26 on `PATH` is no longer picked up |
-| Maven | Provided by the Maven Wrapper | `mvn -version` | **3.9.16** — resolved from a **different** install than expected | 2026-10-01 | `mvn -version` reports `Maven home: C:\Users\Ayush\AppData\Roaming\Code\User\globalStorage\pleiades.java-extension-pack-jdk\maven\latest`, not `C:\DevTools\apache-maven-3.9.16`. `requireMavenVersion [3.9,)` **passed**. This ambiguity is precisely what the wrapper removes — still not generated, see §9 |
+| Maven | Provided by the Maven Wrapper, pinned to 3.9.16 | `./mvnw -version` | **3.9.16** | 2026-10-01 | The wrapper is committed — `.mvn/wrapper/maven-wrapper.properties`, `wrapperVersion=3.3.4`, `distributionType=only-script`, distribution URL `apache-maven-3.9.16-bin.zip` — so the build no longer depends on whichever Maven happens to be on `PATH`. Before it existed, `mvn -version` resolved to a VS Code extension's bundled Maven rather than `C:\DevTools\apache-maven-3.9.16`. `requireMavenVersion [3.9,)` passes either way |
 | Spring Boot | 4.1.1 | `pom.xml` → `<parent>` | **4.1.1** — resolves, builds, and boots | 2026-10-01 | The parent resolves, the JAR is built, `spring-boot:4.1.1:repackage` runs, and the context starts (`:: Spring Boot :: (v4.1.1)`). Hibernate ORM **7.4.5.Final**. The milestone's largest risk is retired |
 
 ## 3. Data stores
@@ -108,17 +110,17 @@ docker compose version
 
 ## 9. Outstanding gaps on this machine
 
-Recorded 2026-10-01 from the output of an actual `mvn clean verify` run. This section describes
-**observed** state, not expected state.
+Recorded 2026-10-01 from the output of an actual `mvn clean verify` run, and revised after the
+Milestone 2 run of the same day. This section describes **observed** state, not expected state.
 
-The build now **compiles, packages, starts the Spring context, and boots MySQL 8.4.11 in a
-container.** One defect remains open.
+That run **compiled both source sets, packaged the Spring Boot JAR, started the Spring context,
+and ran 30 integration tests and 5 unit tests against a real MySQL 8.4.11 container — all
+passing.** Two gaps remain.
 
 | Gap | Why it matters | How to close it |
 | --- | --- | --- |
-| **Flyway's autoconfiguration was missing** — the remaining defect. | Declaring `org.flywaydb:flyway-core` alone is inert on Spring Boot 4: the autoconfiguration moved into the `spring-boot-flyway` module. The context started green and **no migration ran**, so `V1__baseline.sql` never reached the database — a failure a health check cannot see. Two tests caught it. | **Fixed in the POM** by adding `spring-boot-starter-flyway`. Awaiting a re-run — until `mvn clean verify` is green this is a *fix*, not a resolution. |
-| **The Maven Wrapper is not generated.** | `./mvnw clean verify` cannot run. Builds depend on whichever Maven is on `PATH` — and `mvn -version` shows it resolving to a VS Code extension's bundled Maven, not the intended `C:\DevTools` install. That ambiguity is exactly what the wrapper removes. | `mvn -N wrapper:wrapper -Dmaven=3.9.16 -Dtype=only-script`, then commit the three generated files. |
-| **One test emits a deprecation warning under Testcontainers 2.0.5.** | `ApplicationContextIT` "uses or overrides a deprecated API". Not fatal, but a clean build is this repository's standard. | Re-run with `-Xlint:deprecation` to name the API, then replace it. |
+| **No build has run since Milestone 3 was written.** | Every storage and submission test is unexecuted, and `ApplicationContextIT` has grown from 5 tests to 11. The last green run proves the milestones behind us, not this one. | `./mvnw clean verify` with the Docker daemon running, then record the outcome here and under `docs/evidence/`. |
+| **One test emits a deprecation warning under Testcontainers 2.0.5.** | `ApplicationContextIT` "uses or overrides a deprecated API". Not fatal, but a clean build is this repository's standard. The warning was observed against the 5-test version of that class, so it needs re-checking at the current revision. | Re-run with `-Xlint:deprecation` to name the API, then replace it. |
 
 **Closed on 2026-10-01 — resolved by real output, not by assumption:**
 
@@ -132,12 +134,19 @@ container.** One defect remains open.
   its modules; the `testcontainers-` prefix is correct.
 - ~~Nothing has compiled.~~ **Closed.** `javac ... release 21` compiled both source sets, the
   Boot JAR was repackaged, and the integration test ran against a real container.
+- ~~Flyway's autoconfiguration is missing, so no migration runs.~~ **Closed.** Adding
+  `spring-boot-starter-flyway` to the POM was verified by a re-run rather than assumed:
+  `appliesBaselineMigration_andCreatesUsersTable` passes against a containerised MySQL 8.4.11,
+  which it cannot do unless `V1__baseline.sql` reached the database.
+- ~~The Maven Wrapper is not generated.~~ **Closed.** `mvnw`, `mvnw.cmd` and
+  `.mvn/wrapper/maven-wrapper.properties` are committed and pin Maven 3.9.16 with
+  `distributionType=only-script`, so `./mvnw` needs no local Maven install. See §2.
 
-Everything still open is either the wrapper or confirmation of the Flyway fix.
+Everything still open is either an unexecuted test suite or a compiler warning.
 
-> **Why this section records gaps rather than a generated wrapper.** The wrapper scripts are
-> non-trivial bootstrap code that downloads and verifies a Maven distribution. Reproducing
-> them by hand, unrun and unverified, would put a build tool into the repository that looks
-> authoritative and may be subtly broken — the exact failure mode this project's evidence
-> rules are written against (`docs/evidence/README.md` §3). A recorded gap is honest; a
-> fabricated build script is a trap.
+> **On the two entries closed above by a re-run rather than by reasoning.** The Flyway defect was
+> a *fix* until a run proved it, and this document said so while it was one. Closing a gap here
+> requires output, not a plausible explanation — the standard the evidence rules are written to
+> (`docs/evidence/README.md` §3). Note also what this section still cannot claim: the green run it
+> cites was Milestone 2's. Nothing in the submission slice has been executed, which is why the
+> tool-version rows in §2–§6 remain marked *unverified* at this revision.

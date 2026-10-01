@@ -1,5 +1,9 @@
 package com.vit.assignmentportal;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.mysql.MySQLContainer;
@@ -60,5 +64,45 @@ public abstract class MySqlIntegrationTest {
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
+    }
+
+    /**
+     * A per-JVM directory for uploaded artefacts.
+     *
+     * <p>Without this, every upload test would write into {@code ./uploads} — the default
+     * {@code UPLOAD_STORAGE_PATH} — which is the developer's own working tree. Test artefacts
+     * would accumulate there between runs, be invisible to {@code git status} if the directory is
+     * ignored, and make the filesystem assertions of one run depend on what a previous run left
+     * behind. It is created once for the whole suite, alongside the container, for the same
+     * reason: the tests are isolated by using distinct data, not distinct directories.
+     *
+     * <p>The directory is not deleted. It lives under the system temporary directory, which the
+     * operating system reclaims; removing it explicitly would mean deciding when the last test
+     * class had finished, which is the kind of lifecycle bookkeeping that fails silently.
+     */
+    private static final Path STORAGE_ROOT = createStorageRoot();
+
+    private static Path createStorageRoot() {
+        try {
+            return Files.createTempDirectory("portal-test-uploads-");
+        } catch (IOException cause) {
+            throw new UncheckedIOException("Could not create a temporary upload storage root", cause);
+        }
+    }
+
+    @DynamicPropertySource
+    static void storageProperties(DynamicPropertyRegistry registry) {
+        registry.add("app.storage.root", STORAGE_ROOT::toString);
+    }
+
+    /**
+     * The directory uploads are written to during this run.
+     *
+     * <p>Exposed so that a test can assert on the artefacts themselves, not merely on the rows
+     * that describe them — "the metadata accurately describes the stored file" is only provable
+     * by looking at the file.
+     */
+    protected static Path storageRoot() {
+        return STORAGE_ROOT;
     }
 }
