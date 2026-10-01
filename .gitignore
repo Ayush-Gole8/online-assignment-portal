@@ -1,0 +1,78 @@
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+target/
+build/
+out/
+*.class
+*.jar
+*.war
+
+# The Maven Wrapper fetches its own JAR from maven-wrapper.properties.
+# Only the properties file and the wrapper scripts are committed.
+.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+
+# ---------------------------------------------------------------------------
+# IDE and tooling state
+# ---------------------------------------------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+nbproject/
+*.swp
+*.swo
+
+# ---------------------------------------------------------------------------
+# Operating system noise
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Secrets and local configuration — NEVER commit these
+# ---------------------------------------------------------------------------
+# Real credentials live in environment variables or a managed secret store.
+# .env.example is the only dotenv file that belongs in the repository.
+.env
+.env.*
+!.env.example
+*.local
+application-local.properties
+application-local.yml
+application-local.yaml
+*-secret.properties
+*.pem
+*.key
+*.p12
+*.jks
+
+# ---------------------------------------------------------------------------
+# Runtime data produced by a local run
+# ---------------------------------------------------------------------------
+logs/
+*.log
+uploads/
+data/
+tmp/
+
+# ---------------------------------------------------------------------------
+# Test and coverage output
+# ---------------------------------------------------------------------------
+*.exec
+jacoco.exec
+allure-results/
+test-output/
+
+# ---------------------------------------------------------------------------
+# Ansible / Jenkins local artifacts
+# ---------------------------------------------------------------------------
+*.retry
+.jenkins/

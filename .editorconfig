@@ -1,0 +1,37 @@
+# EditorConfig — https://editorconfig.org
+# These rules apply to every contributor regardless of IDE or OS.
+# Do not weaken them in a personal editor profile; raise a PR if a rule is wrong.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Maven POMs and other XML share the Java indent width.
+[*.{java,xml}]
+indent_size = 4
+
+# Configuration, CI, and infrastructure files are conventionally two-space.
+[*.{yml,yaml,json}]
+indent_size = 2
+
+# Shell and Ansible playbooks stay two-space; LF is mandatory (CRLF breaks shebangs).
+[*.sh]
+indent_size = 2
+
+# Thymeleaf templates are HTML and read better at two-space indent.
+[*.html]
+indent_size = 2
+
+# Windows launcher scripts must keep CRLF to execute correctly.
+[*.{bat,cmd}]
+end_of_line = crlf
+
+[*.md]
+# Two trailing spaces are a meaningful hard line break in Markdown.
+trim_trailing_whitespace = false

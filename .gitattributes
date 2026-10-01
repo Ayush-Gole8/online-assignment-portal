@@ -1,0 +1,44 @@
+# Git attributes — https://git-scm.com/docs/gitattributes
+#
+# Normalize every text file to LF inside the repository, independent of the
+# contributor's operating system. Working-tree checkouts are then governed by
+# .editorconfig and the per-type overrides below.
+
+* text=auto eol=lf
+
+# ---------------------------------------------------------------------------
+# Binary content — never diff, merge, or re-encode these.
+# ---------------------------------------------------------------------------
+*.jar    binary
+*.war    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.pdf    binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+
+# ---------------------------------------------------------------------------
+# Line endings that are functionally significant.
+# ---------------------------------------------------------------------------
+# Windows launchers require CRLF to run; the POSIX wrapper requires LF.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+mvnw   text eol=lf
+
+# A CRLF in a shell script, Dockerfile, or Jenkinsfile breaks execution inside
+# the Linux container/build agent, so pin them to LF explicitly.
+Dockerfile*      text eol=lf
+*.sh             text eol=lf
+*.yml            text eol=lf
+*.yaml           text eol=lf
+Jenkinsfile      text eol=lf
+
+# ---------------------------------------------------------------------------
+# Diff / language statistics hints.
+# ---------------------------------------------------------------------------
+# Markdown under docs/ is documentation, not application source.
+docs/**  linguist-documentation
