@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<!--
+  The signed-in landing page.
+
+  It renders `currentUser`, which is a CurrentUserView — a record with an email and a
+  role. It is NOT the User entity: the entity holds a password hash, and a template
+  that can reach a field can render it. See CurrentUserView.
+
+  The sign-out control is a POST form, not a link, for two reasons that reinforce each
+  other: logout changes server-side state, and a GET logout can be fired by an <img>
+  tag on any third-party page. As with the login form, th:action is what causes
+  Thymeleaf to inject the CSRF token — a plain action attribute would yield a 403.
+
+  Expected fields on `currentUser` (CurrentUserView): email, role.
+-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Home — Online Assignment Portal</title>
+    <link rel="stylesheet" th:href="@{/css/portal.css}">
+</head>
+<body>
+
+<header class="bar">
+    <span class="brand">Online Assignment Portal</span>
+
+    <form th:action="@{/logout}" method="post" class="inline">
+        <span class="who" th:text="${currentUser.email}">signed-in@example.com</span>
+        <button type="submit" class="link-button">Sign out</button>
+    </form>
+</header>
+
+<main class="card">
+    <h1>Signed in</h1>
+
+    <dl class="facts">
+        <dt>Email</dt>
+        <dd th:text="${currentUser.email}">student@example.com</dd>
+
+        <dt>Role</dt>
+        <!-- Rendered from the Role enum, so this is exactly the value stored in the
+             `role` column and matched by the route rules. -->
+        <dd><code th:text="${currentUser.role}">STUDENT</code></dd>
+    </dl>
+
+    <h2>What this milestone provides</h2>
+    <p>
+        Authentication, session management, and role-based authorization. The pages that
+        use the STUDENT, REVIEWER, and ADMIN roles arrive with the submission and review
+        milestones; the route rules that will guard them are already in force and are
+        covered by the integration tests.
+    </p>
+
+    <p class="muted">
+        Your role is read from your account on every request. Disabling the account takes
+        effect on your next request, because the session holds server-side state rather
+        than a self-contained token.
+    </p>
+</main>
+
+</body>
+</html>

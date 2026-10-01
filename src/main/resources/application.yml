@@ -83,6 +83,25 @@ server:
     include-stacktrace: never
   shutdown: graceful
 
+  servlet:
+    session:
+      # Session lifetime. ADR-005's follow-up requires the timeout and the cookie
+      # attributes to be configuration rather than hard-coded, so that local and
+      # deployed environments can differ without a rebuild.
+      timeout: ${SESSION_TIMEOUT:30m}
+      cookie:
+        # Not readable by JavaScript. The defence that a token in localStorage would
+        # not have: XSS can act as the user, but it cannot exfiltrate the session id.
+        http-only: true
+        # Not sent on cross-site navigations, which is the browser-side half of the
+        # CSRF story. The server-side half is the token check, which stays enabled.
+        same-site: lax
+        # Must be true anywhere the site is served over HTTPS. Defaults to false so
+        # that local development over http:// works; a deployed environment sets
+        # SESSION_COOKIE_SECURE=true. A `Secure` cookie is not sent over plain HTTP,
+        # so turning this on locally would silently break sign-in.
+        secure: ${SESSION_COOKIE_SECURE:false}
+
 # ---------------------------------------------------------------------------
 # Application settings
 # ---------------------------------------------------------------------------
@@ -96,6 +115,19 @@ app:
     # No code binds this yet — it is declared now so the externalised configuration
     # contract is fixed before the storage capability is implemented.
     root: ${UPLOAD_STORAGE_PATH:./uploads}
+
+  seed:
+    # Whether DevelopmentUserSeeder may create the demo accounts. It is also gated on
+    # the `dev` profile, so this being true is not sufficient on its own — the bean
+    # does not exist under any other profile.
+    #
+    # Two gates rather than one, and the default is `false`: seeding creates
+    # credentials, and the cost of an accidental seed is a predictable account in an
+    # environment nobody expected. The passwords themselves have no default anywhere
+    # — each account is skipped unless its own environment variable is set.
+    #
+    # Local development:  SPRING_PROFILES_ACTIVE=dev APP_SEED_ENABLED=true ./mvnw spring-boot:run
+    enabled: ${APP_SEED_ENABLED:false}
 
 logging:
   level:
