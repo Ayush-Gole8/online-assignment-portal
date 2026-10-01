@@ -173,10 +173,10 @@ failure this line exists to prevent.
 Three, and only three: `STUDENT`, `REVIEWER`, `ADMIN` ([`CLAUDE.md` §7 rule 9](../../CLAUDE.md)).
 `Role.authority()` returns `ROLE_` + the name, which is what `hasRole(...)` matches against.
 
-| Role | May do (MVP intent) | Implemented in this milestone |
+| Role | May do (MVP intent) | Implemented today |
 | --- | --- | --- |
-| `STUDENT` | Sign in, submit coursework, read only their own submissions and status history | Sign-in and route protection only. Submission features arrive later |
-| `REVIEWER` | Sign in, read the review queue, approve or reject | Sign-in and the `/review/**` rule only. The workflow arrives later |
+| `STUDENT` | Sign in, submit coursework, read only their own submissions and status history | Sign-in, route protection, and the whole upload/list/detail slice — see §14 |
+| `REVIEWER` | Sign in, read the review queue, approve or reject | Sign-in and the `/review/**` rule only. The workflow arrives as Milestone 4 |
 | `ADMIN` | Retained for extensibility | The `/admin/**` rule and the role itself. No admin UI, deliberately |
 
 A role is **never** inferred from a request parameter, header, or form field. It is read from the
@@ -196,10 +196,12 @@ Disabling it requires an ADR containing a threat analysis ([`CLAUDE.md` §7 rule
 The machinery:
 
 - Thymeleaf's Spring Security integration hooks any form written with **`th:action`** and injects
-  the token as a hidden `_csrf` field. Every form in `auth/login.html` and `auth/home.html` uses
-  `th:action` for exactly this reason. A plain `action="/login"` produces a form with no token,
-  and the request is refused with a 403 before it reaches authentication — the single most common
-  way a working login page is broken by a well-meaning edit.
+  the token as a hidden `_csrf` field. Every form in `auth/login.html`, `fragments/portal-header.html`
+  and `submission/upload.html` uses `th:action` for exactly this reason. A plain `action="/login"`
+  produces a form with no token, and the request is refused with a 403 before it reaches
+  authentication — the single most common way a working login page is broken by a well-meaning
+  edit. The upload form is the first *multipart* form in the application, and it is worth noting
+  that the token is a normal form field: the multipart encoding carries it like any other part.
 - Sign-out is a **POST**, not a link. A GET logout can be fired by an `<img>` tag on any
   third-party page, which is precisely the attack class this protects against.
 - `SameSite=Lax` is the browser-side half of the story: a cross-site form post carries no session
@@ -301,7 +303,8 @@ has no default either — a missing `DB_PASSWORD` fails startup rather than fall
 
 Recorded so the gaps are visible rather than inferred from silence:
 
-- **No submission or review features.** `/review/**` and `/admin/**` are guarded but unbuilt.
+- **No review feature.** `/review/**` and `/admin/**` are guarded but unbuilt. The submission
+  feature does exist as of Milestone 3 — what it changed about the security surface is §14.
 - **No admin UI.** `ADMIN` exists as a role and gates `/admin/**`; per the brief, no management
   screens are implemented.
 - **No audit trail.** [ADR-005](../adr/ADR-005-session-authentication.md) requires an
@@ -316,8 +319,9 @@ Recorded so the gaps are visible rather than inferred from silence:
 - **No account-management operations.** Nothing changes a password, a role, or the enabled flag
   at runtime. `User.setEnabled` exists for tests and for the admin feature that will own it.
 - **No method-level security.** `@PreAuthorize` is not enabled; the route rules are the whole
-  model. Method security becomes necessary when a service needs to check ownership rather than
-  route access — the next milestone.
+  model. The submission slice does not need it: ownership is enforced by a *query* that carries the
+  owner (§14), which is stronger than a check somebody has to remember to write. Method security
+  would become necessary for a rule that cannot be expressed as a `WHERE` clause.
 - **No rate limiting or lockout.** Repeated failed sign-ins are not throttled. Out of MVP scope,
   and worth revisiting before any internet-facing deployment.
 - **Session state is in memory.** A restart signs everyone out, and horizontal scaling would need
@@ -342,6 +346,108 @@ Recorded so the gaps are visible rather than inferred from silence:
 | A `REVIEWER` passes `/review/**` but is refused `/admin/**` | `AuthorizationIT` |
 | A refusal renders the access-denied page rather than an empty 403 | `AuthorizationIT` |
 | Roles and the unique email constraint exist in the schema | `ApplicationContextIT` |
+| Anonymous access to every submission route becomes a redirect to `/login` | `SubmissionAccessIT` |
+| A student cannot read another student's submission, and the refusal is a 404 | `SubmissionAccessIT` |
+| A student's list contains only their own submissions | `SubmissionAccessIT` |
+| The detail page does not disclose the stored file name | `SubmissionAccessIT` |
+| A PDF-only rule refuses the wrong extension, the wrong declared type, non-PDF bytes, and an oversized file — leaving no row and no file | `SubmissionUploadIT` |
+| Two uploads of the same file name produce two files and two rows | `SubmissionUploadIT` |
+| The recorded size and checksum describe the bytes actually on disk | `SubmissionUploadIT` |
+| A row that does not commit leaves no file behind, and a row that does leaves its file in place | `SubmissionFailureHandlingIT` |
+| A cleanup failure does not mask the failure that caused it | `SubmissionFailureHandlingIT` |
+| The `submissions` `CHECK` constraints, the unique stored name, and the owner foreign key | `ApplicationContextIT` |
 
 Every one of these runs against a real MySQL 8.4 in a Testcontainer, through the real filter
 chain.
+
+## 14. The submission slice's security surface
+
+Milestone 3 added the first feature that stores user-supplied content. What it changed, and what it
+deliberately did not.
+
+### 14.1 No new route rules were needed
+
+`/submissions`, `/submissions/new`, `POST /submissions` and `/submissions/{id}` all fall under
+`anyRequest().authenticated()`. Not one line was added to the route table, and that is the catch-all
+working as intended: a new route is protected when it exists, without anyone remembering to return
+to `SecurityConfiguration`.
+
+Note the deliberate absence: there is **no** `hasRole("STUDENT")` on `/submissions/**`. Ownership
+is the rule that matters here, and a role rule would say nothing about it — a second student has the
+`STUDENT` role and must still be refused. Gating on a role would create the impression that access
+had been checked while leaving the actual boundary unenforced.
+
+### 14.2 Ownership is a query, not a condition
+
+`SubmissionRepository.findByIdAndStudentId(id, studentId)` is the only way a submission is loaded
+for display. The test is in the `WHERE` clause; there is no `if (submission.getStudentId().equals(...))`
+anywhere in the codebase.
+
+That matters more than it looks. A check written in Java is a check the next caller has to remember
+to repeat — and the second caller is written months later by somebody who has not read this
+document. A query that cannot return somebody else's row does not have that failure mode. The
+`studentId` always comes from the authenticated principal; there is no overload of
+`SubmissionService.submit` that accepts an owner, because such an overload is exactly how a
+client-supplied identifier ends up deciding who owns a record ([`CLAUDE.md` §7 rule 8](../../CLAUDE.md)).
+
+### 14.3 "Not yours" and "not there" are the same answer
+
+The refusal is **404**, not 403. A 403 confirms that the identifier exists and belongs to someone —
+which is precisely the fact someone enumerating identifiers is trying to learn. The not-found
+response is indistinguishable from asking for a submission that never existed, and
+`SubmissionAccessIT` asserts both cases so that a future change cannot make one of them
+informative. The identifiers are UUIDs rather than sequential integers for the same reason: a
+sequential id in a URL announces how many submissions exist and invites walking the range.
+
+### 14.4 Upload validation is the primary control, and it is content-based
+
+`FileValidationService` applies five checks in an order that is load-bearing: empty → size →
+extension → declared media type → **leading bytes**. Only the last is authoritative. The filename
+and the client-supplied `Content-Type` are both attacker-controlled, and the classic attack is a
+file named `essay.pdf`, declared as `application/pdf`, whose content is neither. A rule that
+trusted either of the other two would accept it.
+
+The size check runs before a single byte is read into memory, and the same limit is enforced again
+by the servlet container (`spring.servlet.multipart.max-file-size`) and by
+`ck_submissions_file_size` in the schema. Three layers, because the container-level limit is the
+only one that refuses an oversized request without buffering it, and the application-level one is
+the only one that can explain itself.
+
+What validation deliberately does **not** do is inspect the PDF's interior. A file with a valid
+header and a malicious body is stored. Scanning is a separate control that this MVP does not have —
+see §14.7.
+
+### 14.5 Path traversal is unrepresentable
+
+The uploaded file's name is never used to locate anything. `StorageIdentifier` is a record whose
+compact constructor rejects anything that is not a canonical lowercase UUID, so a value such as
+`../../etc/passwd` cannot be constructed at all — the check is not in `StorageService` where
+someone could forget it, it is in the type. `StorageService.resolve` keeps a containment check as
+well, which is unreachable while the identifier invariant holds; it is there so that loosening the
+type fails closed rather than writing outside the volume.
+
+The original filename is still stored, because a reviewer needs to see what the student called the
+file. It is normalised on the way in — directory components and control characters removed,
+truncated from the front to the column width — and it is display metadata in the strictest sense:
+nothing anywhere interpolates it into a path.
+
+### 14.6 The bytes are reachable only through the application
+
+The storage volume is a directory on the host, not a path on the classpath. Nothing maps it to a
+URL and no static-resource handler points at it, so `src/main/resources/static` remains the only
+servable location and uploaded content never lands there. There is **no download endpoint** in the
+MVP: the detail page shows metadata and a checksum, not a link to the file. When one is added it
+must serve `Content-Disposition: attachment` with a fixed content type, never inline
+([`CLAUDE.md` §7 rule 10](../../CLAUDE.md)) — a PDF rendered inline in the origin can execute script
+in some browsers, and uploaded content is the last thing that should be given the application's
+origin.
+
+### 14.7 Residual risks this milestone accepts
+
+| Risk | Why it is accepted | What would fix it |
+| --- | --- | --- |
+| **No content scanning.** A PDF with a valid header and a malicious body is stored | Virus scanning is a pipeline stage of its own, not a validation rule | A scanning stage (ClamAV) in the pipeline, or on upload, before the row is written |
+| **An orphaned file survives a crash between write and commit** | No code runs in that window, so no cleanup can | A sweeper that reconciles the volume against `submissions.stored_file_name` |
+| **No quota or rate limit on uploads** | Out of MVP scope; the per-file limit is the only bound | Per-student storage accounting, or a rate limit at the edge |
+| **A checksum proves integrity, not safety** | An attacker-supplied file has a perfectly valid checksum of its own | Nothing — this is what the checksum is for, and it must not be mistaken for a scanning control |
+| **No `Content-Security-Policy` header** | Not chosen in this milestone; the UI renders no user content as markup today | A CSP header in `SecurityConfiguration`, and templates that never render user text with `th:utext` |

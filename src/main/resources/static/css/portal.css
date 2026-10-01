@@ -193,3 +193,82 @@ code {
     margin-top: 1.5rem;
     color: var(--ink);
 }
+
+/* ---------------------------------------------------------------------------
+   Submission pages
+   --------------------------------------------------------------------------- */
+
+/* The default card is sized for a sign-in form. A table of submissions needs the
+   width; overriding it here rather than widening `.card` keeps the login page as
+   narrow as it should be. */
+.card-wide {
+    max-width: 54rem;
+}
+
+.bar nav a {
+    margin-right: 1rem;
+    color: var(--ink);
+}
+
+table.listing {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+table.listing th,
+table.listing td {
+    padding: 0.55rem 0.6rem;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+
+table.listing th {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+
+/* The status badge. `status-submitted` is the only one reachable today; the other
+   two are defined so that the review milestone does not have to invent a look for
+   them, and so that an unrecognised status falls back to the neutral rule above
+   rather than rendering as nothing. */
+.status {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.status-submitted {
+    border-color: var(--muted);
+    color: var(--muted);
+}
+
+.status-approved {
+    border-color: var(--accept);
+    color: var(--accept);
+}
+
+.status-rejected {
+    border-color: var(--refuse);
+    color: var(--refuse);
+}
+
+/* A 64-character digest is wider than the text column it sits in. Breaking it is a
+   licence to see the whole value, not an aesthetic choice: a checksum a reader
+   cannot read cannot be compared against anything. */
+.checksum {
+    word-break: break-all;
+    font-size: 0.8rem;
+}
+
+input[type="file"] {
+    padding: 0.5rem;
+    background: var(--surface);
+}
+

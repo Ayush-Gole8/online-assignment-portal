@@ -2,6 +2,9 @@ package com.vit.assignmentportal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
+
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +31,25 @@ class ApplicationContextIT extends MySqlIntegrationTest {
     private static final String INSERT_USER = """
             INSERT INTO users (id, email, password_hash, role, enabled, created_at, updated_at)
             VALUES (?, ?, ?, ?, TRUE, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+            """;
+
+    /**
+     * Inserts a submission row directly, bypassing the entity and the service.
+     *
+     * <p>That is the point: {@code SubmissionService} checks the size, the status vocabulary, and
+     * the shape of a decision before it reaches the database, so a test that went through it could
+     * never discover whether the database would also have refused. The three {@code CHECK}
+     * constraints below exist precisely to catch what a bug in that service would let through, and
+     * the only way to prove they are there is to hand the database something the service would
+     * never produce.
+     */
+    private static final String INSERT_SUBMISSION = """
+            INSERT INTO submissions (id, student_id, title, course_code, original_file_name,
+                                     stored_file_name, content_type, file_size_bytes,
+                                     checksum_sha256, status, created_at, updated_at,
+                                     reviewed_at, reviewer_id, version)
+            VALUES (?, ?, 'Essay one', 'CS101', 'essay.pdf', ?, 'application/pdf', ?, ?, ?,
+                    UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), ?, ?, 0)
             """;
 
     @Autowired
@@ -116,5 +138,146 @@ class ApplicationContextIT extends MySqlIntegrationTest {
                 """, Integer.class);
 
         assertThat(width).isEqualTo(36);
+    }
+
+    // ------------------------------------------------------------------------
+    // The submissions schema (V2)
+    // ------------------------------------------------------------------------
+
+    @Test
+    void appliesTheSubmissionsMigration() {
+        assertThat(tableExists("submissions")).isTrue();
+    }
+
+    /**
+     * The database refuses a size the application would never have produced.
+     *
+     * <p>Three callers enforce the 10 MB limit — the servlet container, {@code
+     * FileValidationService}, and this column — and this is the one that cannot be bypassed by a
+     * code change. The lower bound is asserted too: a zero-byte row is what a bug that stored a
+     * file before reading it would leave behind.
+     */
+    @Test
+    void rejectsAFileSizeOutsideTheUploadLimit() {
+        String studentId = aStudent();
+
+        Throwable tooLarge = catchThrowable(() -> insertSubmission(studentId, oversizedSize()));
+        assertThat(tooLarge).isInstanceOf(DataAccessException.class);
+        assertThat(tooLarge.getMessage()).contains("ck_submissions_file_size");
+
+        Throwable empty = catchThrowable(() -> insertSubmission(studentId, 0L));
+        assertThat(empty).isInstanceOf(DataAccessException.class);
+        assertThat(empty.getMessage()).contains("ck_submissions_file_size");
+    }
+
+    @Test
+    void rejectsAStatusOutsideTheEnumVocabulary() {
+        String studentId = aStudent();
+
+        Throwable thrown = catchThrowable(() ->
+                insertSubmission(studentId, "a-valid-name", 1024L, "PENDING", null, null));
+
+        assertThat(thrown).isInstanceOf(DataAccessException.class);
+        assertThat(thrown.getMessage()).contains("ck_submissions_status");
+    }
+
+    /**
+     * A decision cannot be half-recorded.
+     *
+     * <p>{@code APPROVED} with no reviewer and no time is the state the review feature must be
+     * unable to produce — it would mean an approval nobody is accountable for. The constraint is
+     * asserted before that feature exists, which is when it is cheap to change.
+     */
+    @Test
+    void rejectsADecisionWithoutAReviewerOrATime() {
+        String studentId = aStudent();
+
+        Throwable noDecisionDetails = catchThrowable(() ->
+                insertSubmission(studentId, "a-valid-name", 1024L, "APPROVED", null, null));
+        assertThat(noDecisionDetails).isInstanceOf(DataAccessException.class);
+        assertThat(noDecisionDetails.getMessage()).contains("ck_submissions_decision");
+
+        // And the same combination on a row that is still undecided.
+        Throwable submittedButDecided = catchThrowable(() -> insertSubmission(
+                studentId, "another-valid-name", 1024L, "SUBMITTED", null, studentId));
+        assertThat(submittedButDecided).isInstanceOf(DataAccessException.class);
+        assertThat(submittedButDecided.getMessage()).contains("ck_submissions_decision");
+    }
+
+    /**
+     * The stored name is the only link between a row and its bytes, so two rows may not share one.
+     *
+     * <p>If they could, the second upload would overwrite the first student's artefact while both
+     * rows still claimed to describe it — the quietest possible form of data loss.
+     */
+    @Test
+    void rejectsTwoSubmissionsPointingAtTheSameStoredFile() {
+        String studentId = aStudent();
+        String storedFileName = "shared-stored-name";
+
+        insertSubmission(studentId, storedFileName, 1024L, "SUBMITTED", null, null);
+
+        Throwable thrown = catchThrowable(() ->
+                insertSubmission(aStudent(), storedFileName, 1024L, "SUBMITTED", null, null));
+
+        assertThat(thrown).isInstanceOf(DataAccessException.class);
+        assertThat(thrown.getMessage()).contains("uq_submissions_stored_file_name");
+    }
+
+    /** A submission with no owner is not a state this application can produce or should read. */
+    @Test
+    void rejectsASubmissionOwnedByNobody() {
+        Throwable thrown = catchThrowable(() ->
+                insertSubmission(UUID.randomUUID().toString(), 1024L));
+
+        assertThat(thrown).isInstanceOf(DataAccessException.class);
+        assertThat(thrown.getMessage()).contains("fk_submissions_student_id");
+    }
+
+    // ------------------------------------------------------------------------
+    // Support
+    // ------------------------------------------------------------------------
+
+    private boolean tableExists(String tableName) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                  FROM information_schema.tables
+                 WHERE table_schema = DATABASE()
+                   AND table_name = ?
+                """, Integer.class, tableName);
+        return count != null && count == 1;
+    }
+
+    /** Creates a user and returns its identifier, for the foreign key to point at. */
+    private String aStudent() {
+        String id = UUID.randomUUID().toString();
+        jdbcTemplate.update(INSERT_USER, id, id + "@example.com", "$2a$10$notarealhash", "STUDENT");
+        return id;
+    }
+
+    private void insertSubmission(String studentId, long fileSizeBytes) {
+        insertSubmission(studentId, UUID.randomUUID().toString(), fileSizeBytes, "SUBMITTED",
+                null, null);
+    }
+
+    /**
+     * @param reviewedAt the decision timestamp, or {@code null} while the row is undecided
+     * @param reviewerId the deciding user, or {@code null} while the row is undecided
+     */
+    private void insertSubmission(String studentId, String storedFileName, long fileSizeBytes,
+                                  String status, Instant reviewedAt, String reviewerId) {
+        jdbcTemplate.update(INSERT_SUBMISSION,
+                UUID.randomUUID().toString(),
+                studentId,
+                storedFileName,
+                fileSizeBytes,
+                "0".repeat(64),
+                status,
+                reviewedAt == null ? null : Timestamp.from(reviewedAt),
+                reviewerId);
+    }
+
+    private static long oversizedSize() {
+        return 10L * 1024 * 1024 + 1;
     }
 }

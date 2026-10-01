@@ -280,46 +280,71 @@ container (docs/testing/strategy.md §3.2).
 
 ## 11. Current project status
 
-**Milestone 1 — the application builds and boots; the test suite is not yet green.**
+**Milestone 3 — the student submission vertical slice is implemented. Its tests have not been
+executed, so this milestone's suite is written but unproven.**
 
-`mvn clean verify` now compiles both source sets, packages the Spring Boot JAR, starts the
-context, and runs the integration test against a real MySQL 8.4.11 container. It **fails at
-two assertions**: Flyway's autoconfiguration was missing, so `V1__baseline.sql` never ran and
-the `users` table was never created. The POM fix — adding `spring-boot-starter-flyway`, because
-Spring Boot 4 moved `FlywayAutoConfiguration` out of `spring-boot-autoconfigure` — is applied
-and **not yet verified by a re-run**. See ADR-003's 2026-10-01 clarification.
+The last recorded `mvn clean verify` (2026-10-01T12:37) was **green**: 30 Failsafe tests and 5
+Surefire tests, zero failures. That run covered Milestone 2's code and predates every file
+described below, so it is evidence for the two milestones behind us and for nothing in this one.
+The toolchain it used is recorded in
+[`docs/operations/toolchain.md`](docs/operations/toolchain.md).
 
-The Maven Wrapper is still not generated. See
-[`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine).
+Milestone 1 established the build and runtime. Milestone 2 added database-backed authentication.
+Milestone 3 adds the first feature that accepts user-supplied content, which is where the
+pipeline's interest really begins.
 
-Present in the repository:
+### What exists
 
 - Root documents: `README.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `SECURITY.md`, `.editorconfig`,
-  `.gitattributes`, `.gitignore`, `.env.example`.
+  `.gitattributes`, `.gitignore`, `.env.example`, `cspell.json`.
 - `docs/requirements/mvp.md` — scope and explicit exclusions.
-- `docs/architecture/` — system overview, application structure, data model.
+- `docs/architecture/` — system overview, application structure, data model, security.
 - `docs/adr/` — ADR-001 through ADR-007.
 - `docs/testing/strategy.md`, `docs/operations/toolchain.md`, `docs/evidence/`.
 - `.github/` issue templates and pull request template.
 - `pom.xml` — Java 21, Spring Boot 4.1.1, pinned dependency set, enforcer rules.
-- `src/main/java/com/vit/assignmentportal/AssignmentPortalApplication.java`.
-- `src/main/resources/application.yml` — externalised configuration, no secrets.
-- `src/main/resources/db/migration/V1__baseline.sql` — the `users` table.
+- **The Maven Wrapper**, pinned to Maven 3.9.16 with `distributionType=only-script`. `./mvnw` is
+  the canonical build command of §10 and needs nothing on `PATH`.
 - `deploy/docker-compose.yml` — local MySQL 8.4 with a named volume and healthcheck.
-- `src/test/java/.../ApplicationContextIT.java` — context, migration, and constraint proof.
+- `src/main/resources/application.yml` — externalised configuration, no secrets.
 
-**Not yet present — deliberately:**
+**`auth/` — identity (Milestone 2).** `User` entity and repository, `UserService`, and a
+session-based Spring Security configuration with CSRF enabled: form login, logout that invalidates
+the session server-side, `STUDENT`/`REVIEWER`/`ADMIN` mapped to authorities, and deny-by-default
+route rules. `DevelopmentUserSeeder` creates demo accounts under the `dev` profile only, and only
+when `APP_SEED_ENABLED` is true; each password comes from its own environment variable, and none
+has a default. Documented in [`docs/architecture/security.md`](docs/architecture/security.md).
 
-- No authentication. Spring Security is not on the classpath yet; it arrives with the
-  authentication milestone. **The application currently has no login and no route protection.**
-- No feature code: `auth/`, `submission/`, `review/`, and `storage/` are empty of Java.
-- No entities. `V1__baseline.sql` creates `users`; no JPA entity maps it yet.
-- No `templates/` content beyond a `.gitkeep` — no controller renders a view.
-- No `Dockerfile`, no `Jenkinsfile`, no Ansible playbooks, no pipeline stages.
-- **No Maven Wrapper.** `mvnw`, `mvnw.cmd` and `.mvn/wrapper/maven-wrapper.properties` are
-  absent, so `./mvnw clean verify` — the command in §10, the README, `CONTRIBUTING.md`, and the
-  PR template — cannot run. Generate it with `mvn -N wrapper:wrapper -Dmaven=3.9.9 -Dtype=only-script`
-  and commit the three files.
+**`storage/` — file bytes on a volume (Milestone 3).** `StorageService`, `StorageIdentifier`,
+`StorageProperties`, `StorageException`, `FileValidationService`, `ChecksumService`. PDF-only,
+≤ 10 MB, validated by content and not by name; a server-generated identifier that makes path
+traversal unrepresentable; SHA-256 recorded for every stored file. Bytes are written outside any
+servable path.
+
+**`submission/` — the student's slice (Milestone 3).** `Submission` entity and repository,
+`SubmissionService`, `SubmissionController`, the two read models, and three templates. Routes:
+`GET /submissions/new`, `POST /submissions`, `GET /submissions`, `GET /submissions/{id}`. A
+student reaches only their own work — the ownership test is a `WHERE` clause, so somebody else's
+submission is never loaded rather than loaded and refused. The file and the row cannot be
+committed together, so `SubmissionService` orders the writes and removes the file if the row does
+not commit.
+
+**Migrations.** `V1__baseline.sql` creates `users`; `V2__submissions.sql` creates `submissions`
+with its `CHECK` constraints, unique stored-name index, and foreign keys. `ApplicationContextIT`
+exercises each constraint by inserting rows the service would never produce.
+
+### Not yet present — deliberately
+
+- **No review feature.** `/review/**` and `/admin/**` are guarded but have no controller. No
+  reviewer decision, no review queue, no status transition, and no write to `submission_status_history`
+  or `audit_events` — neither table exists.
+- **No audit trail.** ADR-005 requires sign-in attempts, including failures, to be recorded. This
+  is the one Milestone 2 entry criterion still unmet; `docs/architecture/security.md` §12 records
+  why, and the unresolved question about where such a package would live.
+- **No download endpoint.** The detail page shows metadata and a checksum, not the file.
+- **No `Dockerfile`, no `Jenkinsfile`, no Ansible playbooks, no pipeline stages.** The real
+  deliverable of this project — the pipeline — is still ahead.
+- **No admin UI.** `ADMIN` exists as a role and gates `/admin/**`; no management screens ship.
 
 **Do not add placeholder Java classes merely to fill directories.** Empty structure with no
 behaviour is worse than no structure: it implies work that has not happened. Create a class
@@ -349,26 +374,42 @@ Rules for that response:
 
 ## 13. Next milestone readiness
 
-**Milestone 2 — Authentication.** The application currently has **no authentication and no
-route protection**; every route is open. This milestone closes that gap.
+**Milestone 4 — the reviewer decision.** A student can now submit work and see it. Nobody can
+review it: `review/` is empty, `/review/**` is guarded by the filter chain but has no controller,
+and a submission can only ever reach `SUBMITTED`. This milestone closes the loop that
+[`docs/requirements/mvp.md`](docs/requirements/mvp.md) describes.
 
 Entry criteria:
 
-- [ ] Spring Security on the classpath, with the session-based configuration of
-      [ADR-005](docs/adr/ADR-005-session-authentication.md) — form login, logout that
-      invalidates the session server-side, and **CSRF left enabled**.
-- [ ] A `User` entity and repository in `auth/` mapping the `users` table created by
-      `V1__baseline.sql`. The table exists; nothing maps it yet.
-- [ ] BCrypt password hashing, with no plaintext password anywhere in a fixture or a log.
-- [ ] Roles `STUDENT`, `REVIEWER`, `ADMIN` mapped to authorities, and route rules that deny
-      anonymous access to everything except the login page and `/actuator/health`.
-- [ ] Session fixation protection: the session identifier rotates on successful login.
-- [ ] An `AuthenticationSuccessEvent` / `AuthenticationFailureBadCredentialsEvent` listener
-      writing sign-in attempts — **including failures** — to the audit trail.
-- [ ] Integration tests proving: anonymous access is redirected; a wrong password is
-      rejected; a state-changing request without a CSRF token is refused; the session
-      identifier changes after login.
+- [ ] A `ReviewService` in `review/` recording one terminal decision — `APPROVED` or `REJECTED` —
+      with a required comment (FR-18, FR-19), reachable only by a `REVIEWER` or an `ADMIN`.
+- [ ] A review queue of submissions in `SUBMITTED`, and a reviewer's view of an artefact
+      (FR-16, FR-17). Reaching submission data goes through `SubmissionService`; `review` may not
+      import `SubmissionRepository` or mutate a `Submission` directly
+      ([`application-structure.md` §4](docs/architecture/application-structure.md)).
+- [ ] The **terminality rule** enforced in the service, not the view: a decision is final and a
+      decided submission cannot be decided again (FR-20). Rejected work is **not** resubmitted —
+      that is explicitly out of MVP scope.
+- [ ] `reviewed_at` and `reviewer_id` written in the same statement as the status, so
+      `ck_submissions_decision` can never fire. It exists to catch a bug; the service must not be
+      the source of one.
+- [ ] `SubmissionStatusHistory` — entity, table, and one append-only row per transition, carrying
+      previous status, new status, actor, timestamp and comment (FR-15, FR-21). **Neither the
+      table nor the entity exists yet**, so FR-15 is currently unmet: an upload records its
+      `SUBMITTED` status on the submission row but writes no history.
+- [ ] **The audit trail, still outstanding from Milestone 2** (FR-24). ADR-005 requires sign-in
+      attempts — **including failures** — to be recorded. No `audit_events` table and no
+      `AuditService` exist, and the package that would own one is an open question recorded in
+      [`application-structure.md` §5](docs/architecture/application-structure.md).
+- [ ] The student sees the decision and the reviewer's comment on their own submission — and still
+      cannot see anyone else's (FR-14).
+- [ ] Integration tests proving: a `STUDENT` is refused at `/review/**`; an anonymous visitor is
+      redirected; a decision with no comment is refused; a second decision on a decided submission
+      is refused; a student cannot read another student's submission through any review route.
+- [ ] `./mvnw clean verify` green, and the run recorded under
+      [`docs/evidence/`](docs/evidence/), which currently holds no captured output for any
+      milestone.
 
-Nothing in Milestone 2 may be merged with a hard-coded secret. The version numbers recorded in
+Nothing in Milestone 4 may be merged with a hard-coded secret. The version numbers recorded in
 [`docs/operations/toolchain.md`](docs/operations/toolchain.md) must be updated with the
 versions actually used.

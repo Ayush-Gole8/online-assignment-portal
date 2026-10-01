@@ -8,14 +8,16 @@ health checking, and rollback.
 The application is deliberately modest. The engineering objective of this repository is the
 **delivery pipeline and the discipline around it**, not feature volume.
 
-> **Status: Milestone 1 — application skeleton, not yet built.** The Spring Boot application,
-> its externalised configuration, the first Flyway migration, the local MySQL Compose service,
-> and an integration test are all written. **None of it has been compiled, started, or run:**
-> the Maven Wrapper is not generated and no build has executed on this machine.
+> **Status: Milestone 3 — the student submission slice is implemented.** Session sign-in with the
+> three roles, PDF upload with server-side validation, SHA-256 checksums, file storage on a
+> volume, and a student's own submission list and detail page all exist. The last recorded
+> `mvn clean verify` (Milestone 2, 2026-10-01) was green; **the tests added by Milestone 3 have
+> not been run**, so treat this milestone's suite as written but unproven.
 >
-> It has **no authentication and no route protection yet** — Spring Security is not on the
-> classpath, so every route is open. That is the next milestone. There is also no `Dockerfile`,
-> no `Jenkinsfile`, and no Ansible playbook yet.
+> **Nobody can review anything yet.** `review/` is empty, a submission can only ever be
+> `SUBMITTED`, there is no status history, and there is no audit trail. There is also no
+> `Dockerfile`, no `Jenkinsfile`, and no Ansible playbook — the delivery pipeline this repository
+> exists to demonstrate is still ahead.
 >
 > See [Unverified claims](#unverified-claims) before relying on any statement below.
 >
@@ -100,19 +102,28 @@ required stages are fixed by [`docs/requirements/mvp.md`](docs/requirements/mvp.
 ├── SECURITY.md                   # Threat model, secret handling, reporting
 ├── pom.xml                       # Java 21, Spring Boot 4.1.1, pinned dependencies
 ├── mvnw / mvnw.cmd               # Maven Wrapper — the canonical build mechanism
-│                                 #   ⚠ NOT YET GENERATED — see Unverified claims
-├── .editorconfig / .gitattributes / .gitignore / .env.example
+│                                 #   pins Maven 3.9.16; no local Maven needed
+├── .editorconfig / .gitattributes / .gitignore / .env.example / cspell.json
 ├── .github/                      # Issue templates and PR template
 ├── src/
 │   ├── main/java/com/vit/assignmentportal/
-│   │   └── AssignmentPortalApplication.java
+│   │   ├── AssignmentPortalApplication.java
+│   │   ├── auth/                 # identity: sign-in, roles, the User entity
+│   │   ├── submission/           # the student's slice: upload, list, detail
+│   │   ├── storage/              # file bytes on a volume: validate, store, checksum
+│   │   ├── config/               # the security filter chain and route rules
+│   │   └── common/               # shared kernel — value types and enums only
 │   ├── main/resources/
 │   │   ├── application.yml       # Externalised configuration — no secrets
-│   │   ├── db/migration/         # Flyway migrations
-│   │   ├── templates/            # Thymeleaf views
+│   │   ├── db/migration/         # Flyway migrations: V1 users, V2 submissions
+│   │   ├── templates/            # Thymeleaf views, one directory per feature
 │   │   └── static/               # CSS and assets
 │   └── test/java/com/vit/assignmentportal/
-│       └── ApplicationContextIT.java
+│       ├── MySqlIntegrationTest.java      # the shared Testcontainers base class
+│       ├── ApplicationContextIT.java      # migrations and every schema constraint
+│       ├── auth/                 # encoder unit test + authentication/authorization ITs
+│       ├── storage/              # unit tests: validation, checksums, paths, I/O
+│       └── submission/           # upload, access-isolation, failure-handling ITs
 ├── docs/
 │   ├── requirements/             # What must be built (and what must not)
 │   ├── architecture/             # Structure, diagrams, data model
@@ -156,15 +167,15 @@ wrapper downloads it.
 > `JAVA_HOME` is the JDK **root** — not its `bin` directory, and not `java.exe`. Confirm with
 > `mvn -version`, which prints the JDK actually in use.
 
-> **Steps 3 and 4 do not work yet: the Maven Wrapper is not in the repository.** Generate it
-> once from the repository root, then commit the three files it produces:
+> The Maven Wrapper is committed and pins **Maven 3.9.16**, so steps 3 and 4 need no local Maven
+> install. Regenerate it only if that pin should move:
 >
 > ```bash
-> mvn -N wrapper:wrapper -Dmaven=3.9.9 -Dtype=only-script
+> mvn -N wrapper:wrapper -Dmaven=3.9.16 -Dtype=only-script
 > ```
 >
-> This is the one command in this document that needs a local Maven. Afterwards it never does
-> again. See [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine).
+> See [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine)
+> for the gaps still open on this machine.
 
 ```bash
 # 1. Create your local environment file and replace every change-me value
@@ -196,29 +207,34 @@ than an in-memory substitute, so the migration is exercised on the engine that s
 
 ## Next milestone readiness
 
-**Milestone 2 — authentication.** The application is currently **unauthenticated**: Spring
-Security is not on the classpath and every route is reachable. The next milestone adds
-session-based sign-in, the three roles, route protection, and an audit trail of sign-in
-attempts. It is the first milestone to put real code into the `auth` and `config` packages.
+**Milestone 4 — the reviewer decision.** A student can submit work and see their own; nobody can
+review it. The next milestone adds the reviewer queue, the single terminal approve/reject decision
+with its required comment, the append-only status history, and the audit trail still outstanding
+from Milestone 2.
 
 Entry criteria: [`CLAUDE.md` §13](CLAUDE.md#13-next-milestone-readiness).
 
 ## Unverified claims
 
-The repository is written but **has never been built**. Stating that plainly is more useful
-than a status line that reads as though it works. As of 2026-10-01:
+**The last recorded build is Milestone 2's**, and it was green — 30 Failsafe tests and 5 Surefire
+tests, zero failures. That run predates every file the submission slice added, so it is evidence
+for the milestones behind us and for nothing in the current one. As of 2026-10-01:
 
 | Claim | Status |
 | --- | --- |
-| `./mvnw clean verify` passes | **Not run** — the wrapper is not generated and Maven is not installed |
-| `spring-boot-starter-parent:4.1.1` and the starter coordinates resolve | **Not checked** against any repository |
-| The application starts and serves `/actuator/health` | **Not run** |
-| `deploy/docker-compose.yml` brings MySQL up healthy | **Not run** |
-| `V1__baseline.sql` applies and the `users` table accepts the documented roles | **Not run** |
-| `ApplicationContextIT` passes | **Not run** |
+| `./mvnw clean verify` passes **at this revision** | **Not run** — the last green run was Milestone 2 |
+| The storage and submission unit tests pass | **Not run** |
+| The upload, access-isolation, and failure-handling ITs pass | **Not run** |
+| `ApplicationContextIT` passes with the `submissions` constraints | **Not run** — the recorded run executed the 5-test Milestone 2 version |
+| Spring Boot 4.1.1 and the starter coordinates resolve | **Verified** — the parent resolves, the JAR is repackaged, the context boots |
+| `V1__baseline.sql` applies and `users` accepts the documented roles | **Verified** by the recorded `ApplicationContextIT` |
+| Authentication and route rules behave as documented | **Verified** by the recorded `AuthenticationIT` (11) and `AuthorizationIT` (14) |
+| `deploy/docker-compose.yml` brings MySQL up healthy | **Not run** — the tests use a Testcontainers MySQL 8.4.11 instead |
+| The application serves `/actuator/health` | **Not run** |
+| A real browser can complete a workflow | **Not run** — Selenium is not a dependency yet |
 
-The design intent behind each artefact is recorded and reviewable; its *behaviour* is not yet
-evidence. [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine)
+Design intent is recorded and reviewable; behaviour counts as evidence only where a run is named
+above. [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine)
 lists the gaps and how to close each one.
 
 ## License
