@@ -2,58 +2,43 @@ package com.vit.assignmentportal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * The Milestone 1 integration test required by CLAUDE.md §13: it proves the Spring context
- * starts, that Flyway applies the baseline migration, and that JPA is wired against a real
- * MySQL 8.4.
+ * The integration test required by CLAUDE.md §13: it proves the Spring context starts, that
+ * Flyway applies the baseline migration, and that the database-level constraints the schema
+ * declares actually exist.
  *
- * <p>A real MySQL rather than H2, because the point is to exercise the engine that ships
- * (ADR-003, docs/testing/strategy.md §3.2). H2 would pass against a dialect that never runs
- * in production and would hide a broken migration.
- *
- * <p>Datasource properties are supplied through {@link DynamicPropertySource}, which takes
- * precedence over {@code application.yml}. That is deliberate: it prevents application.yml's
- * {@code ${DB_PASSWORD}} placeholder from being resolved, so the test needs no environment
- * variables and no secret is written into the test sources.
- *
- * <p>Requires a running Docker daemon (Testcontainers) — see docs/operations/toolchain.md §4.
+ * <p>These are the assertions a unit test cannot make and a schema review can only assume. A
+ * {@code CHECK} constraint that is never exercised is a constraint that may not exist — it is
+ * one typo away from being a comment (ADR-003, docs/testing/strategy.md §3.2).
  */
 @SpringBootTest
-@Testcontainers
-class ApplicationContextIT {
+class ApplicationContextIT extends MySqlIntegrationTest {
 
+    /**
+     * Inserts a row without going through JPA, so the constraints under test are the database's
+     * rather than Hibernate's.
+     */
     private static final String INSERT_USER = """
-            INSERT INTO users (username, password_hash, display_name, role, enabled, created_at)
-            VALUES (?, ?, ?, ?, TRUE, UTC_TIMESTAMP(6))
+            INSERT INTO users (id, email, password_hash, role, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, TRUE, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
             """;
-
-    @Container
-    static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");
-
-    @DynamicPropertySource
-    static void datasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
-        registry.add("spring.datasource.username", MYSQL::getUsername);
-        registry.add("spring.datasource.password", MYSQL::getPassword);
-    }
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Test
     void contextLoads() {
-        // Fails if any bean, Flyway migration, or JPA mapping cannot be constructed.
+        // Fails if any bean, Flyway migration, or JPA mapping cannot be constructed. In
+        // particular this is where a mismatch between the User entity and the migrated table
+        // surfaces: ddl-auto is `validate`, so Hibernate refuses to start rather than silently
+        // altering the schema (ADR-003).
     }
 
     @Test
@@ -70,30 +55,66 @@ class ApplicationContextIT {
 
     @Test
     void acceptsAValidRole_andRejectsAnUnknownOne() {
-        // A CHECK constraint that is never exercised is a constraint that may not exist
-        // (ADR-003, docs/testing/strategy.md §3.2).
-        jdbcTemplate.update(INSERT_USER, "constraint-probe", "$2a$10$notarealhash",
-                "Constraint Probe", "STUDENT");
+        jdbcTemplate.update(INSERT_USER, UUID.randomUUID().toString(), "constraint-probe@example.com",
+                "$2a$10$notarealhash", "STUDENT");
 
         assertThat(jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM users WHERE username = ?", Integer.class, "constraint-probe"))
+                "SELECT COUNT(*) FROM users WHERE email = ?", Integer.class,
+                "constraint-probe@example.com"))
                 .isEqualTo(1);
 
         Throwable thrown = catchThrowable(() ->
-                jdbcTemplate.update(INSERT_USER,
-                        "invalid-role-user",
-                        "hash",
-                        "Invalid Role User",
-                        "INVALID_ROLE"
-                )
-        );
-        
-        assertThat(thrown)
-                .isInstanceOf(DataAccessException.class);
-        
+                jdbcTemplate.update(INSERT_USER, UUID.randomUUID().toString(),
+                        "invalid-role@example.com",
+                        "$2a$10$notarealhash",
+                        "INVALID_ROLE"));
+
+        assertThat(thrown).isInstanceOf(DataAccessException.class);
         assertThat(thrown.getMessage())
                 .contains("ck_users_role")
                 .contains("violated");
     }
 
+    /**
+     * The unique index on {@code email} rejects a duplicate — and does so case-insensitively,
+     * because the column collation is {@code utf8mb4_0900_ai_ci}.
+     *
+     * <p>The case-insensitivity is the part worth proving. It is what stops "Student@example.com"
+     * and "student@example.com" becoming two accounts for one person, and it is a property of the
+     * schema rather than of any Java code — so it would survive a rewrite of the service layer
+     * and must therefore be asserted against the database.
+     */
+    @Test
+    void rejectsADuplicateEmail_evenWhenTheCaseDiffers() {
+        String email = "unique-probe@example.com";
+        jdbcTemplate.update(INSERT_USER, UUID.randomUUID().toString(), email,
+                "$2a$10$notarealhash", "STUDENT");
+
+        Throwable thrown = catchThrowable(() ->
+                jdbcTemplate.update(INSERT_USER, UUID.randomUUID().toString(),
+                        "UNIQUE-PROBE@example.com",
+                        "$2a$10$notarealhash",
+                        "REVIEWER"));
+
+        assertThat(thrown).isInstanceOf(DataAccessException.class);
+        assertThat(thrown.getMessage()).contains("uq_users_email");
+    }
+
+    /**
+     * An identifier that is not a UUID cannot be stored. The column is {@code VARCHAR(36)}, so
+     * this is a length assertion rather than a type assertion — MySQL will accept any 36-character
+     * string. It documents the column's width, which is what the entity's converter relies on.
+     */
+    @Test
+    void storesTheIdentifierAsAFixedWidthString() {
+        Integer width = jdbcTemplate.queryForObject("""
+                SELECT CHARACTER_MAXIMUM_LENGTH
+                  FROM information_schema.columns
+                 WHERE table_schema = DATABASE()
+                   AND table_name = 'users'
+                   AND column_name = 'id'
+                """, Integer.class);
+
+        assertThat(width).isEqualTo(36);
+    }
 }

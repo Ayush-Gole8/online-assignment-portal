@@ -1,0 +1,195 @@
+/*
+ * The portal's stylesheet.
+ *
+ * Deliberately one small hand-written file rather than a framework. The UI is
+ * server-rendered and has no build step (ADR-002); adding a CSS toolchain would put a
+ * Node runtime into a Java pipeline for the sake of three pages.
+ *
+ * The application ships no JavaScript. Every flow in the MVP — signing in, and later
+ * uploading and reviewing — completes as a plain form post, which is what lets the
+ * Selenium suite run without waiting on client-side rendering (NFR-2).
+ */
+
+:root {
+    --ink: #1b1f24;
+    --muted: #5b6470;
+    --line: #d8dee6;
+    --accept: #1f7a3d;
+    --refuse: #a4262c;
+    --surface: #ffffff;
+    --backdrop: #eef1f5;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--backdrop);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.5;
+}
+
+body.centered {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 1.5rem;
+}
+
+.card {
+    width: 100%;
+    max-width: 30rem;
+    padding: 2rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+}
+
+body:not(.centered) .card {
+    margin: 2rem auto;
+}
+
+h1 {
+    margin-top: 0;
+    font-size: 1.35rem;
+}
+
+h2 {
+    margin-top: 2rem;
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+}
+
+.subtitle {
+    margin-top: -0.5rem;
+    color: var(--muted);
+}
+
+label {
+    display: block;
+    margin: 1rem 0 0.25rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+input {
+    width: 100%;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font: inherit;
+}
+
+input:focus-visible,
+button:focus-visible,
+a:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+}
+
+button {
+    margin-top: 1.5rem;
+    width: 100%;
+    padding: 0.65rem 1rem;
+    border: none;
+    border-radius: 6px;
+    background: var(--ink);
+    color: var(--surface);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.notice {
+    padding: 0.6rem 0.8rem;
+    border-radius: 6px;
+    border: 1px solid;
+    font-size: 0.9rem;
+}
+
+.notice-error {
+    border-color: var(--refuse);
+    color: var(--refuse);
+}
+
+.notice-success {
+    border-color: var(--accept);
+    color: var(--accept);
+}
+
+.bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1.5rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+}
+
+.brand {
+    font-weight: 700;
+}
+
+.inline {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.who {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+/* A button that has to be a button — signing out changes server-side state and must
+   carry a CSRF token, so it cannot be an anchor — but should read as a link. */
+.link-button {
+    width: auto;
+    margin: 0;
+    padding: 0;
+    background: none;
+    color: var(--ink);
+    text-decoration: underline;
+    font-weight: 400;
+}
+
+.facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0;
+}
+
+.facts dt {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.facts dd {
+    margin: 0;
+}
+
+code {
+    padding: 0.1rem 0.35rem;
+    background: var(--backdrop);
+    border-radius: 4px;
+    font-size: 0.9em;
+}
+
+.muted {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.button-link {
+    display: inline-block;
+    margin-top: 1.5rem;
+    color: var(--ink);
+}

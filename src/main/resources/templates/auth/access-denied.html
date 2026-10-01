@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<!--
+  The 403 page, reached by a server-side forward from Spring Security's
+  AccessDeniedHandlerImpl (see SecurityConfiguration#accessDeniedPage).
+
+  This page is only ever shown to a user who IS authenticated but lacks the role a route
+  requires. An anonymous visitor never arrives here — the authentication entry point
+  redirects them to /login instead. Keeping the two cases separate is what stops a
+  signed-in user being sent round a login loop they cannot escape: signing in again
+  would not grant the missing role.
+
+  The response status is 403, set by the handler before the forward.
+-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Not permitted — Online Assignment Portal</title>
+    <link rel="stylesheet" th:href="@{/css/portal.css}">
+</head>
+<body class="centered">
+
+<main class="card">
+    <h1>Not permitted</h1>
+
+    <p>
+        Your account does not have the role required to view that page.
+    </p>
+
+    <p class="muted">
+        Signing in again will not change this. If you believe you should have access,
+        ask an administrator to review the role on your account.
+    </p>
+
+    <!-- th:href so the context path is prepended when the application is not deployed
+         at the root. -->
+    <a th:href="@{/}" class="button-link">Return to your home page</a>
+</main>
+
+</body>
+</html>

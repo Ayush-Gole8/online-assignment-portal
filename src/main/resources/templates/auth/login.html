@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<!--
+  The sign-in page (ADR-005).
+
+  Two things about this file are load-bearing rather than cosmetic:
+
+  1. `th:action` and NOT `action`. Thymeleaf's Spring Security integration hooks the
+     form's action attribute and injects the CSRF token as a hidden input. A plain
+     `action="/login"` produces a form with no token, and the request is refused by
+     CsrfFilter with a 403 before it ever reaches authentication. This is the single
+     most common way a working login page is broken by a well-meaning edit.
+
+  2. The field is named `email`, matching `usernameParameter("email")` in
+     SecurityConfiguration. It is the email address that is also this application's
+     username; the single word is used end to end so that the column, the entity,
+     the record, and this input all name the same thing.
+
+  The failure message is deliberately one sentence that does not say whether the
+  address is registered. See AuthController.
+-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign in — Online Assignment Portal</title>
+    <link rel="stylesheet" th:href="@{/css/portal.css}">
+</head>
+<body class="centered">
+
+<main class="card">
+    <h1>Online Assignment Portal</h1>
+    <p class="subtitle">Sign in to continue</p>
+
+    <!-- Present after a failed attempt. Spring Security redirects to /login?error. -->
+    <p class="notice notice-error" th:if="${signInFailed}" role="alert">
+        Those credentials were not accepted. Please try again.
+    </p>
+
+    <!-- Present after a successful sign-out. Spring Security redirects to /login?logout. -->
+    <p class="notice notice-success" th:if="${signedOut}" role="status">
+        You have been signed out.
+    </p>
+
+    <form th:action="@{/login}" method="post">
+        <label for="email">Email</label>
+        <!--
+          autocomplete="username" so a password manager fills it: this IS the username,
+          whatever the field is called. The `type` is `text` rather than `email` because
+          HTML5 validation would block a non-address before the server sees it, and the
+          server is where the decision belongs — client-side checks are a convenience and
+          never a control (CLAUDE.md §7).
+        -->
+        <input type="text"
+               id="email"
+               name="email"
+               autocomplete="username"
+               autofocus
+               required>
+
+        <label for="password">Password</label>
+        <input type="password"
+               id="password"
+               name="password"
+               autocomplete="current-password"
+               required>
+
+        <button type="submit">Sign in</button>
+    </form>
+</main>
+
+</body>
+</html>

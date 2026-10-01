@@ -1,11 +1,20 @@
 # Data Model
 
-**Status:** Baselined — Milestone 0 (planned; no entities or migrations exist yet)
-**Related:** [System overview](system-overview.md) · [ADR-003](../adr/ADR-003-mysql-system-of-record.md) ·
+**Status:** Partially implemented — Milestone 2 (`users` migrated and mapped; `submissions`,
+`submission_status_history` and `audit_events` still planned)
+**Related:** [System overview](system-overview.md) · [Security architecture](security.md) ·
+[ADR-003](../adr/ADR-003-mysql-system-of-record.md) ·
 [ADR-004](../adr/ADR-004-filesystem-volume-and-db-metadata.md) · [MVP requirements](../requirements/mvp.md)
 
-This is the **initial planned** persistence model. It is the contract the first Flyway
-migration must implement. Column names are shown as they will appear in MySQL.
+This is the persistence model. Column names are shown as they appear in MySQL. **§2 `users` is
+implemented** — `V1__baseline.sql` creates it and `auth/User.java` maps it. **§3–§5 are still
+planned**: those tables do not exist yet, and each is the contract the migration implementing it
+must satisfy.
+
+> **Amended 2026-10-01.** §2 originally specified a `BIGINT` surrogate key with `username` and
+> `display_name` columns. It now specifies a `UUID` identifier and an `email` login identifier,
+> to match the Milestone 2 brief. The amendment was safe because `V1__baseline.sql` had never
+> been applied in any environment — see §7.
 
 ---
 
@@ -22,18 +31,18 @@ erDiagram
     USERS ||--o{ AUDIT_EVENTS : "acts as actor"
 
     USERS {
-        bigint id PK
-        varchar username UK
+        varchar(36) id PK
+        varchar email UK
         varchar password_hash
-        varchar display_name
         varchar role
         boolean enabled
         datetime created_at
+        datetime updated_at
     }
 
     SUBMISSIONS {
         bigint id PK
-        bigint student_id FK
+        varchar(36) student_id FK
         varchar assignment_code
         varchar original_filename
         varchar storage_identifier UK
@@ -43,7 +52,7 @@ erDiagram
         varchar status
         datetime submitted_at
         datetime decided_at
-        bigint decided_by FK
+        varchar(36) decided_by FK
         bigint version
     }
 
@@ -52,14 +61,14 @@ erDiagram
         bigint submission_id FK
         varchar previous_status
         varchar new_status
-        bigint actor_id FK
+        varchar(36) actor_id FK
         varchar comment
         datetime occurred_at
     }
 
     AUDIT_EVENTS {
         bigint id PK
-        bigint actor_id FK
+        varchar(36) actor_id FK
         varchar event_type
         varchar target_type
         varchar target_id
@@ -69,8 +78,13 @@ erDiagram
     }
 ```
 
+Every foreign key that points at `users(id)` must be `VARCHAR(36)` to match, because MySQL
+requires the referenced and referencing columns to have the same type. Only `users` exists so
+far; the rest is the corrected contract for the migrations that will create them.
+
 `AUDIT_EVENTS` is required by FR-24 but is not one of the three named entities in the
-milestone brief; it is listed here so the initial migration can create it in the same pass.
+milestone brief; it is listed here so the migration that introduces the audit trail can create
+it in the same pass. **It does not exist yet** — see [security.md §12](security.md#12-what-this-milestone-does-not-do).
 
 ## 2. `users`
 

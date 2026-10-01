@@ -96,6 +96,24 @@
       <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
 
+    <!-- ===================== Security ===================== -->
+    <!--
+      Session-based form authentication (ADR-005). This brings Spring Security itself plus
+      `spring-boot-security`, the module that carries SecurityAutoConfiguration.
+
+      Boot 4's module split makes that second part worth stating, because the same trap as
+      Flyway below applies here. Declaring only a library leaves nothing to call it: the
+      context starts, the feature silently does not. `spring-boot-starter-security` is what
+      wires the filter chain into the servlet context. CSRF protection, session-fixation
+      protection and the HttpOnly JSESSIONID cookie all arrive enabled from that
+      autoconfiguration; config/SecurityConfiguration narrows them explicitly rather than
+      switching them on.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+
     <!-- ===================== Operability ===================== -->
     <!-- Supplies /actuator/health, the pipeline's health-check stage target (FR-25). -->
     <dependency>
@@ -107,6 +125,38 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!--
+      The Spring Security test support: `csrf()`, `user(...)`, `@WithMockUser`, and the
+      SecurityMockMvcConfigurer that applies the real filter chain under MockMvc. Without it
+      the security tests would have to hand-place an Authentication into the SecurityContext,
+      which tests the test rather than the configuration (docs/testing/strategy.md §3.3).
+    -->
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!--
+      MockMvc and the web-layer test slices (@AutoConfigureMockMvc).
+
+      This is the same Boot 4 module split as Flyway above, and it bites in the same silent
+      way. `spring-boot-starter-test` brings JUnit, AssertJ, Mockito and
+      `spring-boot-test-autoconfigure` — but NOT the web test slice, which Boot 4 moved into
+      its own module. Without this, `org.springframework.boot.test.autoconfigure.web.servlet`
+      simply does not exist, and the failure is a missing symbol in a test source rather
+      than anything that looks like a dependency problem.
+
+      On Spring Boot 4, a test slice needs its `spring-boot-starter-<technology>-test`
+      module. This is the webmvc one; a JPA slice would be `spring-boot-starter-data-jpa-test`,
+      and so on (ADR-003).
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-webmvc-test</artifactId>
       <scope>test</scope>
     </dependency>
 
