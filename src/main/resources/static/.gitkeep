@@ -1,0 +1,7 @@
+This file exists only so that Git tracks an otherwise empty directory.
+
+`static/` holds the CSS and assets for the server-rendered UI (application-structure.md §2).
+It is empty in this milestone because no stylesheet has been written yet, and an empty
+directory cannot be committed.
+
+Delete this file the moment the first asset lands.

@@ -1,0 +1,103 @@
+# Runtime configuration for the Online Assignment Portal.
+#
+# Rules (CLAUDE.md §8):
+#   * This file holds DEFAULTS ONLY. Every secret arrives from the environment.
+#   * Placeholders resolve in the order: environment variable -> default shown here.
+#   * No password, token, or credential is ever written in this file.
+#
+# The same artefact is promoted between environments; nothing is rebuilt per environment.
+
+spring:
+  application:
+    name: online-assignment-portal
+
+  config:
+    # Spring Boot does not read `.env` on its own — only Docker Compose does. Importing it
+    # here makes the documented local workflow work: one file, `.env`, supplies the same
+    # variable names to both the application and the Compose database.
+    #
+    # `optional:` means the file is not required. In CI and in deployed environments the
+    # values arrive as real environment variables, which take precedence over this file.
+    # `.env` is git-ignored; `.env.example` documents the variable names only.
+    import:
+      - optional:file:.env[.properties]
+
+  datasource:
+    # DB_URL, DB_USERNAME and DB_PASSWORD are supplied by the environment.
+    # The defaults exist so a developer can start against the local Compose MySQL
+    # (deploy/docker-compose.yml) without exporting anything. DB_PASSWORD deliberately
+    # has NO default: a missing password must fail fast, never fall back to empty.
+    url: ${DB_URL:jdbc:mysql://localhost:3306/assignment_portal}
+    username: ${DB_USERNAME:assignment_portal}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    # Hibernate NEVER owns the schema. Flyway creates and evolves it, and Hibernate
+    # only verifies that the entities match what the migrations produced (ADR-003).
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        # Store and read timestamps in UTC regardless of host or JVM time zone.
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # Migrations are forward-only. Never let Flyway silently repair or re-baseline a
+    # schema that already has history (ADR-003).
+    baseline-on-migrate: false
+    validate-on-migrate: true
+
+  # Uploads are capped at 10 MB in the MVP (FR-7). Rejecting oversized multipart requests
+  # here stops them before a byte reaches application code.
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+# ---------------------------------------------------------------------------
+# Operability — the delivery pipeline's health-check and rollback stages depend
+# on these (FR-25).
+# ---------------------------------------------------------------------------
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only `health` is published. `env`, `configprops` and `beans` would expose
+        # configuration and must never be internet-reachable.
+        include: health
+  endpoint:
+    health:
+      # Report status only. Details can include database host names and driver versions.
+      show-details: never
+
+server:
+  port: ${APP_PORT:8080}
+  # Do not advertise the container/server technology in responses.
+  error:
+    include-message: never
+    include-stacktrace: never
+  shutdown: graceful
+
+# ---------------------------------------------------------------------------
+# Application settings
+# ---------------------------------------------------------------------------
+app:
+  storage:
+    # Root directory for uploaded artefacts. Bytes live on a persistent volume and
+    # only metadata lives in MySQL (ADR-004). The default is a local, git-ignored
+    # directory so a developer needs no configuration; deployed environments set
+    # UPLOAD_STORAGE_PATH to the mounted volume.
+    #
+    # No code binds this yet — it is declared now so the externalised configuration
+    # contract is fixed before the storage capability is implemented.
+    root: ${UPLOAD_STORAGE_PATH:./uploads}
+
+logging:
+  level:
+    root: INFO
+    com.vit.assignmentportal: INFO
