@@ -44,11 +44,13 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  * as importantly — the case where it ends well, because a cleanup step that always deleted would
  * pass every failure test in this file and destroy every successful upload.
  *
- * <p>Only {@link SubmissionRepository} is mocked. It is the one seam that has to be, because
- * "the database refused the write" cannot be arranged through the application's own validation —
- * every value that reaches {@code save} has already been checked. The volume is real throughout:
- * a mocked filesystem would accept whatever the test told it to, and every assertion below is about
- * what is actually on the disk.
+ * <p>Two seams are mocked, and no more: {@link SubmissionRepository}, because "the database refused
+ * the write" cannot be arranged through the application's own validation — every value that reaches
+ * {@code save} has already been checked — and {@link SubmissionStatusHistoryRepository}, which is
+ * written in the same method and would otherwise try to insert a history row for a submission the
+ * stubbed repository never gave an identifier. The volume is real throughout: a mocked filesystem
+ * would accept whatever the test told it to, and every assertion below is about what is actually on
+ * the disk.
  *
  * <p>The failure that remains untestable is the process dying between the write and the commit. No
  * code runs in that case, so the file is orphaned; that is documented as a known limitation rather
@@ -75,6 +77,19 @@ class SubmissionFailureHandlingIT extends MySqlIntegrationTest {
 
     @MockitoBean
     private SubmissionRepository submissionRepository;
+
+    /**
+     * Mocked alongside {@link SubmissionRepository}, because {@code submit} now writes a creation
+     * row into it inside the same transaction.
+     *
+     * <p>The mock is not a convenience. With {@code SubmissionRepository.save} stubbed, the entity
+     * that comes back has no identifier — no {@code @PrePersist} ran — so a real history repository
+     * would be asked to insert a row whose {@code submission_id} is null and would fail the foreign
+     * key. The test is about where the <em>file</em> ends up, so the second write is stubbed out
+     * rather than allowed to raise an unrelated failure.
+     */
+    @MockitoBean
+    private SubmissionStatusHistoryRepository statusHistoryRepository;
 
     /**
      * The file is written and then the row fails: the file must be gone.
@@ -146,6 +161,7 @@ class SubmissionFailureHandlingIT extends MySqlIntegrationTest {
         Path blockedRoot = Files.createFile(scratch.resolve("not-a-directory"));
         SubmissionService serviceWithAnUnusableVolume = new SubmissionService(
                 submissionRepository,
+                statusHistoryRepository,
                 new StorageService(new StorageProperties(blockedRoot)),
                 new FileValidationService(),
                 new ChecksumService());
@@ -200,6 +216,7 @@ class SubmissionFailureHandlingIT extends MySqlIntegrationTest {
         AuthenticatedUser student = studentFor("failure-cleanup");
         SubmissionService serviceWithAnUndeletableVolume = new SubmissionService(
                 submissionRepository,
+                statusHistoryRepository,
                 new UndeletableStorageService(scratch),
                 new FileValidationService(),
                 new ChecksumService());

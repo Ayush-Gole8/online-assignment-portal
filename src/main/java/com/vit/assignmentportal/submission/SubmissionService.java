@@ -1,6 +1,7 @@
 package com.vit.assignmentportal.submission;
 
 import com.vit.assignmentportal.auth.AuthenticatedUser;
+import com.vit.assignmentportal.common.SubmissionStatus;
 import com.vit.assignmentportal.storage.ChecksumService;
 import com.vit.assignmentportal.storage.FileValidationService;
 import com.vit.assignmentportal.storage.StorageIdentifier;
@@ -69,15 +70,18 @@ public class SubmissionService {
     private static final int MAX_COURSE_CODE_LENGTH = 20;
 
     private final SubmissionRepository submissionRepository;
+    private final SubmissionStatusHistoryRepository statusHistoryRepository;
     private final StorageService storageService;
     private final FileValidationService fileValidationService;
     private final ChecksumService checksumService;
 
     public SubmissionService(SubmissionRepository submissionRepository,
+                             SubmissionStatusHistoryRepository statusHistoryRepository,
                              StorageService storageService,
                              FileValidationService fileValidationService,
                              ChecksumService checksumService) {
         this.submissionRepository = submissionRepository;
+        this.statusHistoryRepository = statusHistoryRepository;
         this.storageService = storageService;
         this.fileValidationService = fileValidationService;
         this.checksumService = checksumService;
@@ -145,7 +149,15 @@ public class SubmissionService {
         // rollback.
         registerFileDiscardOnRollback(stored);
 
-        return submissionRepository.save(submission);
+        Submission saved = submissionRepository.save(submission);
+
+        // The creation entry (FR-15), in the same transaction as the row it describes. A history
+        // that could be written separately is a history that can disagree with the submission it
+        // belongs to; writing both here means either both exist or neither does.
+        statusHistoryRepository.save(
+                SubmissionStatusHistory.creation(saved.getId(), student.id()));
+
+        return saved;
     }
 
     /**
@@ -177,6 +189,170 @@ public class SubmissionService {
         Objects.requireNonNull(submissionId, "submissionId");
         return submissionRepository.findByIdAndStudentId(submissionId, studentId)
                 .orElseThrow(SubmissionNotFoundException::forRequestedSubmission);
+    }
+
+    /**
+     * The student's own status history for one of their own submissions.
+     *
+     * <p>Scoped by owner, and the ownership check comes first: the submission is looked up with
+     * {@link #findForStudent} before any history is read, so a student asking for the history of
+     * somebody else's submission gets the same 404 as if it did not exist. Reading the history
+     * directly by submission identifier would be the leak — the history rows carry no owner, so
+     * they cannot defend themselves.
+     *
+     * @throws SubmissionNotFoundException if the submission is not this student's
+     */
+    @Transactional(readOnly = true)
+    public List<SubmissionStatusHistory> historyForStudent(UUID studentId, UUID submissionId) {
+        findForStudent(studentId, submissionId);
+        return statusHistoryRepository.findBySubmissionIdOrderByCreatedAtAsc(submissionId);
+    }
+
+    /**
+     * The student's own file, for download (FR-13).
+     *
+     * <p>Same ordering as the history: the row is selected by owner, and only then are the bytes
+     * read. The storage identifier never leaves this method.
+     *
+     * @throws SubmissionNotFoundException if the submission is not this student's
+     */
+    @Transactional(readOnly = true)
+    public DownloadableFile downloadForStudent(UUID studentId, UUID submissionId) {
+        return fileFor(findForStudent(studentId, submissionId));
+    }
+
+    // ------------------------------------------------------------------------
+    // The review side
+    //
+    // These methods are NOT scoped by owner, and that is the whole difference between them and
+    // the student's. A reviewer is authorised by role at the route, not by ownership of the row:
+    // reviewing only one's own submissions would be meaningless. The role check lives in
+    // SecurityConfiguration's /review/** rule, and the review feature reaches every one of these
+    // through ReviewService rather than touching the repository
+    // (docs/architecture/application-structure.md §4 rule 1).
+    // ------------------------------------------------------------------------
+
+    /**
+     * The reviewer's queue: everything still awaiting a decision, oldest first (FR-16).
+     *
+     * <p>Oldest first, unlike the student's list. A queue is worked through, so the submission that
+     * has been waiting longest is the one that should be seen first; a student's list answers "what
+     * did I hand in recently?" and is therefore newest first. Served by the
+     * {@code (status, created_at)} index.
+     */
+    @Transactional(readOnly = true)
+    public List<Submission> listAwaitingReview() {
+        return submissionRepository.findByStatusOrderByCreatedAtAsc(SubmissionStatus.SUBMITTED);
+    }
+
+    /**
+     * Any submission, for a reviewer (FR-17).
+     *
+     * @throws SubmissionNotFoundException if no submission has that identifier
+     */
+    @Transactional(readOnly = true)
+    public Submission findForReview(UUID submissionId) {
+        Objects.requireNonNull(submissionId, "submissionId");
+        return submissionRepository.findById(submissionId)
+                .orElseThrow(SubmissionNotFoundException::forRequestedSubmission);
+    }
+
+    /** Any submission's status history, for a reviewer. */
+    @Transactional(readOnly = true)
+    public List<SubmissionStatusHistory> historyForReview(UUID submissionId) {
+        findForReview(submissionId);
+        return statusHistoryRepository.findBySubmissionIdOrderByCreatedAtAsc(submissionId);
+    }
+
+    /** Any submission's file, for a reviewer to read before deciding (FR-17). */
+    @Transactional(readOnly = true)
+    public DownloadableFile downloadForReview(UUID submissionId) {
+        return fileFor(findForReview(submissionId));
+    }
+
+    /**
+     * Applies a reviewer's decision and records it in the history (FR-18, FR-20, FR-21).
+     *
+     * <p>This is the <em>mechanical</em> half of a decision: the status transition, the two
+     * decision columns, and the history row. The <em>policy</em> — that a rejection must carry a
+     * reason and an approval must not — belongs to {@code ReviewService}, which calls this. The
+     * split is what the dependency rules require: the review feature may not mutate a
+     * {@link Submission} or touch its repository, and this feature has no business knowing what a
+     * reviewer's comment rules are.
+     *
+     * <h2>Three guarantees, one transaction</h2>
+     *
+     * <ol>
+     *   <li><strong>The submission is re-read inside this transaction.</strong> The caller passes
+     *       an identifier, not an entity, so the terminality check below runs against the row as it
+     *       is now rather than as some earlier request saw it.</li>
+     *   <li><strong>Terminality is enforced by the entity.</strong> {@link Submission#approve} and
+     *       {@link Submission#reject} throw {@link SubmissionAlreadyDecidedException} for a row
+     *       that is not {@code SUBMITTED}, which is what refuses a second approval, a second
+     *       rejection, and a decision on already-decided work.</li>
+     *   <li><strong>The status change and the history row commit together.</strong> Both writes are
+     *       inside this method's transaction, so a failure in either rolls back both. A decision
+     *       recorded with no history, or a history entry for a decision that was never applied,
+     *       cannot be left behind.</li>
+     * </ol>
+     *
+     * <p>The optimistic lock is the fourth guarantee and the one this method does not have to
+     * implement: {@code Submission.version} is a {@code @Version} column, so if two reviewers
+     * decide the same submission concurrently the second commit updates nothing and Spring
+     * translates that into an {@code ObjectOptimisticLockingFailureException}. The controller turns
+     * it into a message. Nobody's decision is silently overwritten.
+     *
+     * @param reviewerId   the deciding reviewer, from the authenticated principal
+     * @param submissionId the submission to decide
+     * @param outcome      {@code APPROVED} or {@code REJECTED}
+     * @param note         the reviewer's comment; required for a rejection, {@code null} otherwise
+     * @return the decided submission
+     * @throws SubmissionNotFoundException        if no submission has that identifier
+     * @throws SubmissionAlreadyDecidedException  if it has already been decided
+     */
+    @Transactional
+    public Submission recordDecision(UUID reviewerId, UUID submissionId,
+                                     SubmissionStatus outcome, String note) {
+        Objects.requireNonNull(reviewerId, "reviewerId");
+        Objects.requireNonNull(submissionId, "submissionId");
+        Objects.requireNonNull(outcome, "outcome");
+
+        Submission submission = findForReview(submissionId);
+        SubmissionStatus previousStatus = submission.getStatus();
+
+        switch (outcome) {
+            case APPROVED -> submission.approve(reviewerId);
+            case REJECTED -> submission.reject(reviewerId, note);
+            // SUBMITTED is not a decision. It is rejected here rather than silently treated as a
+            // no-op, because a caller asking to "decide" a submission into SUBMITTED has a bug,
+            // and the service that owns the transition is the right place to say so.
+            case SUBMITTED -> throw new IllegalArgumentException(
+                    "A decision must be APPROVED or REJECTED.");
+        }
+
+        Submission decided = submissionRepository.save(submission);
+
+        statusHistoryRepository.save(SubmissionStatusHistory.transition(
+                decided.getId(), reviewerId, previousStatus, outcome, note));
+
+        return decided;
+    }
+
+    /**
+     * Reads the bytes a submission row describes.
+     *
+     * <p>Private, and takes the entity: every public caller above has already decided whether the
+     * requester may see this row, and this method is the step after that decision rather than a
+     * second way to make it.
+     */
+    private DownloadableFile fileFor(Submission submission) {
+        byte[] content = storageService.load(
+                new StorageIdentifier(submission.getStoredFileName()));
+
+        return new DownloadableFile(
+                submission.getOriginalFileName(),
+                submission.getContentType(),
+                content);
     }
 
     /**

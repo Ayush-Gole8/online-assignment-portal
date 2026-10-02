@@ -78,7 +78,8 @@ label {
     font-size: 0.9rem;
 }
 
-input {
+input,
+textarea {
     width: 100%;
     padding: 0.6rem 0.7rem;
     border: 1px solid var(--line);
@@ -87,6 +88,7 @@ input {
 }
 
 input:focus-visible,
+textarea:focus-visible,
 button:focus-visible,
 a:focus-visible {
     outline: 2px solid var(--ink);
@@ -230,10 +232,9 @@ table.listing th {
     color: var(--muted);
 }
 
-/* The status badge. `status-submitted` is the only one reachable today; the other
-   two are defined so that the review milestone does not have to invent a look for
-   them, and so that an unrecognised status falls back to the neutral rule above
-   rather than rendering as nothing. */
+/* The status badge. All three states are reachable: a student submits, and a reviewer
+   approves or rejects. The colours match `.notice-error`/`.notice-success` so an outcome
+   reads the same wherever it appears. */
 .status {
     display: inline-block;
     padding: 0.1rem 0.5rem;
@@ -270,5 +271,83 @@ table.listing th {
 input[type="file"] {
     padding: 0.5rem;
     background: var(--surface);
+}
+
+/* ---------------------------------------------------------------------------
+   Review pages
+   --------------------------------------------------------------------------- */
+
+/* A sub-heading inside a section. The global `h2` is an uppercase section label;
+   this one names a part of the page that is not itself a top-level section —
+   "Reason for rejection" inside the decision block. */
+.section-heading {
+    margin-top: 1.25rem;
+    font-size: 0.9rem;
+    text-transform: none;
+    letter-spacing: normal;
+    color: var(--ink);
+}
+
+/* The chronological history. A list, not a table: the entries are ordered and their
+   order is the point, so the numbers and the vertical rule carry it. */
+.timeline {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-left: 2px solid var(--line);
+}
+
+.timeline li {
+    position: relative;
+    padding: 0 0 0.9rem 1rem;
+}
+
+.timeline li::before {
+    content: "";
+    position: absolute;
+    left: -0.4rem;
+    top: 0.35rem;
+    width: 0.6rem;
+    height: 0.6rem;
+    background: var(--surface);
+    border: 2px solid var(--muted);
+    border-radius: 50%;
+}
+
+.timeline-when,
+.timeline-what {
+    margin: 0;
+}
+
+.timeline-when {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.timeline-what {
+    font-weight: 600;
+}
+
+/* The decision form's controls sit side by side. The global `button` rule is
+   `width: 100%` for the single-button forms; the actions here are inline by width. */
+.review-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+}
+
+.review-actions .button {
+    width: auto;
+    margin: 0;
+}
+
+/* Reject is the destructive choice, so it is coloured as one — but it is not styled to
+   be hard to reach: a reviewer must be able to reject as easily as approve. */
+.button.primary {
+    background: var(--accept);
+}
+
+.button.danger {
+    background: var(--refuse);
 }
 

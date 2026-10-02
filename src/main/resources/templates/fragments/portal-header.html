@@ -11,8 +11,9 @@
 
   Expects `currentUser` in the model, which is a CurrentUserView — an email and a role,
   never the User entity. Every controller that renders a page behind authentication
-  puts it there: HomeController explicitly, SubmissionController via a
-  @ModelAttribute method.
+  puts it there: HomeController explicitly, SubmissionController and ReviewController
+  via a @ModelAttribute method. The role is what decides whether the "Review queue" link
+  is offered; the route itself is guarded by SecurityConfiguration, not by that condition.
 
   Signing out is a POST, not a link, for two reasons that reinforce each other: logout
   changes server-side state, and a GET logout can be fired by an <img> tag on any
@@ -29,9 +30,17 @@
 <header class="bar" th:fragment="header">
     <a class="brand" th:href="@{/}">Online Assignment Portal</a>
 
+    <!-- The submission links are shown to everyone: a reviewer may also be a student, and
+         the filter chain, not this condition, is what decides whether /submissions is
+         reachable. The review link is added only for REVIEWER and ADMIN — not as a control
+         (the route is guarded server-side) but because offering a link that 403s would be
+         a lie about what the page can do. `currentUser.role` is a Role, so the comparison
+         is against the enum name rather than a string constant. -->
     <nav class="inline">
         <a th:href="@{/submissions}">My submissions</a>
         <a th:href="@{/submissions/new}">Upload</a>
+        <a th:if="${currentUser.role.name() == 'REVIEWER' or currentUser.role.name() == 'ADMIN'}"
+           th:href="@{/review}">Review queue</a>
     </nav>
 
     <form th:action="@{/logout}" method="post" class="inline">

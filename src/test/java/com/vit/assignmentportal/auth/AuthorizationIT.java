@@ -31,10 +31,11 @@ import org.springframework.test.web.servlet.MockMvc;
  * {@code Role.authority()}, and {@code hasRole(...)} — is under test only if the session came
  * from a real login.
  *
- * <p>Two of the paths exercised here have no controller yet; the submission and review features
- * arrive in later milestones. That does not weaken the assertion. Spring Security's filter chain
- * runs <em>before</em> dispatch, so a request refused with a 403 was refused by the rule, and a
- * request that reaches 404 has provably passed it. Those cases say so in a comment.
+ * <p>The admin paths exercised here have no controller yet; the admin feature is not part of the
+ * MVP. That does not weaken the assertion. Spring Security's filter chain runs <em>before</em>
+ * dispatch, so a request refused with a 403 was refused by the rule, and a request that reaches 404
+ * has provably passed it. Those cases say so in a comment. The review queue, by contrast, is a real
+ * page now, so its cases assert a 200 rather than a 404.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -114,7 +115,7 @@ class AuthorizationIT extends MySqlIntegrationTest {
 
     @Test
     void redirectsAnonymousVisitorsAwayFromARoleGatedRoute() throws Exception {
-        mockMvc.perform(get("/review/queue"))
+        mockMvc.perform(get("/review"))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/login"));
     }
@@ -150,29 +151,30 @@ class AuthorizationIT extends MySqlIntegrationTest {
      */
     @Test
     void refusesAStudentTheReviewQueue() throws Exception {
-        mockMvc.perform(get("/review/queue").session(signInAs(Role.STUDENT)))
+        mockMvc.perform(get("/review").session(signInAs(Role.STUDENT)))
                 .andExpect(status().isForbidden());
     }
 
     /**
-     * A REVIEWER passes the rule.
+     * A REVIEWER passes the rule and reaches the queue page.
      *
-     * <p>The 404 is the assertion, not a defect: {@code /review/queue} has no controller until
-     * the review milestone, and a path that reaches "no handler" has provably satisfied the
-     * authorisation rule. The status becomes 200 when the queue is built, and this test should be
-     * updated then — a failing test at that point is the correct signal, because the expectation
-     * genuinely changed.
+     * <p>This asserted a 404 while {@code /review} had no controller, because a request that
+     * reached "no handler" had provably satisfied the authorisation rule. The queue now exists, so
+     * the assertion is the stronger one: the rule lets the reviewer through <em>and</em> the page
+     * renders.
      */
     @Test
     void permitsAReviewerTheReviewQueue() throws Exception {
-        mockMvc.perform(get("/review/queue").session(signInAs(Role.REVIEWER)))
-                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/review").session(signInAs(Role.REVIEWER)))
+                .andExpect(status().isOk())
+                .andExpect(view().name("review/queue"));
     }
 
     @Test
     void permitsAnAdminTheReviewQueue() throws Exception {
-        mockMvc.perform(get("/review/queue").session(signInAs(Role.ADMIN)))
-                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/review").session(signInAs(Role.ADMIN)))
+                .andExpect(status().isOk())
+                .andExpect(view().name("review/queue"));
     }
 
     // ------------------------------------------------------------------------
@@ -220,7 +222,7 @@ class AuthorizationIT extends MySqlIntegrationTest {
      */
     @Test
     void rendersTheAccessDeniedPageForAnAuthenticatedUserWithoutTheRole() throws Exception {
-        mockMvc.perform(get("/review/queue").session(signInAs(Role.STUDENT)))
+        mockMvc.perform(get("/review").session(signInAs(Role.STUDENT)))
                 .andExpect(status().isForbidden())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl("/access-denied"));
     }

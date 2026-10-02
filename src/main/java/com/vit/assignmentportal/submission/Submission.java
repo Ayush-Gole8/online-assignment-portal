@@ -151,13 +151,14 @@ public class Submission {
      * this copy exists because the reviewer's queue needs it on every row, and joining an
      * append-only log to render a list is wasteful (docs/architecture/data-model.md §3).
      *
-     * <p>Unused in this milestone — nothing sets it. The review feature owns that transition.
+     * <p>Set by {@link #approve} and {@link #reject}, together with {@link #reviewerId} and the
+     * status, because {@code ck_submissions_decision} requires all three to agree.
      */
     @Column(name = "reviewed_at")
     private Instant reviewedAt;
 
     /**
-     * The reviewer who decided. {@code null} until then, and unused in this milestone.
+     * The reviewer who decided. {@code null} until then.
      *
      * <p>Kept as a bare identifier for the same reason as {@link #studentId}, and because the
      * database foreign key already guarantees it names a real user.
@@ -168,7 +169,7 @@ public class Submission {
 
     /**
      * Why a submission was rejected. {@code null} unless the status is
-     * {@link SubmissionStatus#REJECTED}, and unused in this milestone.
+     * {@link SubmissionStatus#REJECTED}.
      */
     @Column(name = "rejection_reason", length = 2000)
     private String rejectionReason;
@@ -200,9 +201,9 @@ public class Submission {
         this.contentType = contentType;
         this.fileSizeBytes = fileSizeBytes;
         this.checksumSha256 = checksumSha256;
-        // The only status a submission can be created in. There is deliberately no method that
-        // moves it anywhere else — the review feature will own that transition, and until it
-        // exists the only reachable state is SUBMITTED.
+        // The only status a submission can be created in. The transition out of it is
+        // approve/reject below, and there is no method that sets any other value — which is what
+        // keeps SUBMITTED -> APPROVED and SUBMITTED -> REJECTED the only reachable transitions.
         this.status = SubmissionStatus.SUBMITTED;
     }
 
@@ -230,6 +231,72 @@ public class Submission {
                                     String checksumSha256) {
         return new Submission(studentId, title, courseCode, originalFileName, storedFileName,
                 contentType, fileSizeBytes, checksumSha256);
+    }
+
+    /**
+     * Records a reviewer's approval.
+     *
+     * <p>The status, the decision time, and the reviewer are set <strong>together</strong>. That is
+     * not tidiness: {@code ck_submissions_decision} requires a non-{@code SUBMITTED} row to carry
+     * both a {@code reviewed_at} and a {@code reviewer_id}, so a method that set the status and
+     * left either null would be refused by the database. The constraint exists to catch a bug here,
+     * and this method is written so it cannot be the source of one.
+     *
+     * <p>No rejection reason is set, and none may be supplied — see
+     * {@code ReviewService} for where that rule produces a message. An approval with a reason
+     * attached would leave a row whose {@code rejection_reason} contradicts its {@code APPROVED}
+     * status.
+     *
+     * @param reviewerId the deciding reviewer, taken from the authenticated principal
+     * @throws SubmissionAlreadyDecidedException if this submission is not {@code SUBMITTED}
+     */
+    void approve(UUID reviewerId) {
+        requireUndecided();
+        Objects.requireNonNull(reviewerId, "reviewerId");
+
+        this.status = SubmissionStatus.APPROVED;
+        this.reviewedAt = Instant.now();
+        this.reviewerId = reviewerId;
+    }
+
+    /**
+     * Records a reviewer's rejection, with the reason the student will read.
+     *
+     * <p>The reason is required here as well as in the service (FR-19). The service's check is what
+     * produces a sentence a reviewer can act on; this one is what makes a reason-less rejection
+     * unrepresentable for any caller, which is the same reasoning that puts the terminality rule on
+     * the entity rather than in a controller.
+     *
+     * @param reviewerId the deciding reviewer, taken from the authenticated principal
+     * @param reason     why the work was refused; must not be blank
+     * @throws SubmissionAlreadyDecidedException if this submission is not {@code SUBMITTED}
+     * @throws IllegalArgumentException          if the reason is missing or blank
+     */
+    void reject(UUID reviewerId, String reason) {
+        requireUndecided();
+        Objects.requireNonNull(reviewerId, "reviewerId");
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("A rejection requires a reason.");
+        }
+
+        this.status = SubmissionStatus.REJECTED;
+        this.reviewedAt = Instant.now();
+        this.reviewerId = reviewerId;
+        this.rejectionReason = reason;
+    }
+
+    /**
+     * The terminality rule (FR-20), in the one place every transition passes through.
+     *
+     * <p>{@code SUBMITTED} is the only state a decision may be made from, so this rejects a second
+     * approval, a second rejection, and an approval of already-rejected work with the same answer.
+     * Checking the current status rather than enumerating forbidden pairs means a status added
+     * later is terminal by default rather than accidentally decidable.
+     */
+    private void requireUndecided() {
+        if (status != SubmissionStatus.SUBMITTED) {
+            throw SubmissionAlreadyDecidedException.forDecidedSubmission();
+        }
     }
 
     /**

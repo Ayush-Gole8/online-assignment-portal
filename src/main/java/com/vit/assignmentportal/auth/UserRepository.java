@@ -8,9 +8,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * Persistence for {@link User}. Owned by the {@code auth} feature — no other feature may import
  * it (docs/architecture/application-structure.md §4 rule 1).
  *
- * <p>There is no "find by role" or "list all": nothing in this milestone needs one. A repository
- * method is a query someone has to maintain, and speculative finders are how a repository
- * interface becomes a description of the table rather than of the application.
+ * <p>There is no "find by role" and no "list all": nothing in the application needs one. The
+ * reviewer's queue is a query over submissions, not over users, and a role is read from the
+ * authenticated principal rather than looked up. A repository method is a query someone has to
+ * maintain, and speculative finders are how a repository interface becomes a description of the
+ * table rather than of the application.
  */
 public interface UserRepository extends JpaRepository<User, UUID> {
 

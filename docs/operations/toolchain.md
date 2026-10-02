@@ -119,7 +119,7 @@ passing.** Two gaps remain.
 
 | Gap | Why it matters | How to close it |
 | --- | --- | --- |
-| **No build has run since Milestone 3 was written.** | Every storage and submission test is unexecuted, and `ApplicationContextIT` has grown from 5 tests to 11. The last green run proves the milestones behind us, not this one. | `./mvnw clean verify` with the Docker daemon running, then record the outcome here and under `docs/evidence/`. |
+| **No build has run since Milestone 3 was written — and Milestone 4 has since been added on top.** | Every storage, submission, and review test is unexecuted. `ApplicationContextIT` has grown again, and the review suite (`ReviewWorkflowIT`, `ReviewControllerTest`, `SubmissionConcurrencyIT`) has never been compiled, let alone run. The last green run proves the two milestones *behind* us, not either of the two in front of us. | `./mvnw clean verify` with the Docker daemon running, then record the outcome here and under `docs/evidence/`. |
 | **One test emits a deprecation warning under Testcontainers 2.0.5.** | `ApplicationContextIT` "uses or overrides a deprecated API". Not fatal, but a clean build is this repository's standard. The warning was observed against the 5-test version of that class, so it needs re-checking at the current revision. | Re-run with `-Xlint:deprecation` to name the API, then replace it. |
 
 **Closed on 2026-10-01 — resolved by real output, not by assumption:**

@@ -79,16 +79,24 @@ public class SecurityConfiguration {
                         // ------------------------------------------------------------------
                         // 2. Role-gated routes.
                         //
-                        //    These paths have no controller yet: the submission and review
-                        //    features arrive in later milestones. The rules are declared now
-                        //    because the authorisation model is this milestone's deliverable,
-                        //    and they are proved by AuthorizationIT, which asserts a STUDENT
-                        //    is refused here while a REVIEWER is not.
+                        //    The review queue is real now; /admin/** still has no controller,
+                        //    because no admin UI ships in the MVP. The admin rule is declared
+                        //    anyway because the authorisation model is a deliverable in its own
+                        //    right, and AuthorizationIT proves a STUDENT is refused there while
+                        //    an ADMIN is not.
+                        //
+                        //    /review and /review/** are listed separately rather than relying on
+                        //    `/review/**` to also cover the bare path: whether a trailing `**`
+                        //    matches the empty remainder is a matcher-implementation detail, and
+                        //    the queue lives at exactly `/review`. Stating both removes the
+                        //    question — and a rule that silently failed to cover its own page
+                        //    would fall through to `anyRequest().authenticated()`, which is the
+                        //    one outcome a role rule must never have.
                         //
                         //    hasAnyRole/hasRole prepend ROLE_ themselves, matching
                         //    Role.authority().
                         // ------------------------------------------------------------------
-                        .requestMatchers("/review/**").hasAnyRole("REVIEWER", "ADMIN")
+                        .requestMatchers("/review", "/review/**").hasAnyRole("REVIEWER", "ADMIN")
                         .requestMatchers("/admin/**").hasRole("ADMIN")
 
                         // ------------------------------------------------------------------

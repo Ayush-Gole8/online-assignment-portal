@@ -24,11 +24,11 @@ import org.springframework.stereotype.Service;
  * cannot be fetched without going through an endpoint that checks who is asking
  * ({@code CLAUDE.md} §7 rule 7, ADR-004).
  *
- * <p><strong>Every method on this class is the one the transaction relies on.</strong>
- * {@link #store(byte[])} and {@link #delete(StorageIdentifier)} are the two halves of an
- * operation that spans a file system and a database, and neither can be made atomic with the
- * other. {@code SubmissionService} is where that gap is closed; read it before changing the
- * contract here.
+ * <p><strong>{@link #store(byte[])} and {@link #delete(StorageIdentifier)} are the pair the
+ * transaction relies on.</strong> They are the two halves of an operation that spans a file system
+ * and a database, and neither can be made atomic with the other. {@code SubmissionService} is
+ * where that gap is closed; read it before changing the contract here. {@link #load} is outside
+ * that concern — it only reads.
  */
 @Service
 public class StorageService {
@@ -95,6 +95,44 @@ public class StorageService {
             throw new StorageException("The uploaded file could not be stored.", cause);
         } finally {
             discardPartialFile(partial);
+        }
+    }
+
+    /**
+     * Reads a stored file back.
+     *
+     * <p>Serves the download endpoints (FR-13, FR-17). Note what this method does <em>not</em> do:
+     * decide whether the caller may have the bytes. It takes an identifier and returns the file,
+     * exactly as {@link #store(byte[])} takes bytes and returns an identifier — the storage
+     * capability has no idea who is asking, and authorisation is the submission feature's business
+     * ({@code CLAUDE.md} §7 rule 8). A caller reaches this only after the ownership or role check
+     * has already selected the row the identifier came from.
+     *
+     * <p>Returns a {@code byte[]} rather than a stream. The artefact is at most 10 MB — enforced by
+     * the container, by {@code FileValidationService}, and by {@code ck_submissions_file_size} —
+     * and the upload path already holds the whole file in memory to checksum it, so a stream here
+     * would be a different trade-off made in only half the code. It is also what lets the caller
+     * hash the bytes it is about to serve.
+     *
+     * <p>A missing file is a {@link StorageException}, not an empty result. A row exists that
+     * names it, so its absence is not a normal condition — it means the volume and the table
+     * disagree, which is exactly the state an operator must be told about rather than have papered
+     * over with a zero-length download.
+     *
+     * @param identifier the file to read
+     * @return the stored bytes
+     * @throws StorageException if the file is missing or cannot be read
+     */
+    public byte[] load(StorageIdentifier identifier) {
+        Objects.requireNonNull(identifier, "identifier");
+        try {
+            return Files.readAllBytes(resolve(identifier));
+        } catch (IOException cause) {
+            // The identifier is named in the message because this is an operator-facing failure
+            // about the volume's own consistency. It is never rendered to a user: the controller
+            // answers a 500 through the error page, which includes no message (application.yml).
+            throw new StorageException(
+                    "The stored file " + identifier.value() + " could not be read.", cause);
         }
     }
 

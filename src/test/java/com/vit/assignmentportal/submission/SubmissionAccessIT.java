@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrlPattern;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -77,14 +78,20 @@ class SubmissionAccessIT extends MySqlIntegrationTest {
      * {@code permitAll} is added for something unrelated.
      */
     @ParameterizedTest
-    @ValueSource(strings = {"/submissions", "/submissions/new", "/submissions/00000000-0000-0000-0000-000000000000"})
+    @ValueSource(strings = {
+            "/submissions",
+            "/submissions/new",
+            "/submissions/00000000-0000-0000-0000-000000000000",
+            "/submissions/00000000-0000-0000-0000-000000000000/file"})
     void redirectsAnonymousVisitorsToTheLoginPage(String path) throws Exception {
-        // A pattern rather than an exact location: whether the entry point writes a relative path
-        // or an absolute URL is Spring Security's business, not this test's. What matters is that
-        // the destination is the login page.
+        // The exact location, not a `**/login` pattern: Spring Security's entry point writes
+        // `/login` here, and `redirectedUrlPattern` matches the whole value against an Ant
+        // pattern. `/login` has no leading slash to consume, so `**/login` never matches it —
+        // the pattern form failed for every one of these cases while the redirect itself was
+        // correct. Asserting the literal value also states the destination precisely.
         mockMvc.perform(get(path))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrlPattern("**/login"));
+                .andExpect(redirectedUrl("/login"));
     }
 
     /**
@@ -102,7 +109,7 @@ class SubmissionAccessIT extends MySqlIntegrationTest {
                         .param("courseCode", "CS101")
                         .with(csrf()))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrlPattern("**/login"));
+                .andExpect(redirectedUrl("/login"));
     }
 
     /**
@@ -240,6 +247,49 @@ class SubmissionAccessIT extends MySqlIntegrationTest {
         String body = page.getResponse().getContentAsString();
         assertThat(student.storedFileName()).isNotBlank();
         assertThat(body).doesNotContain(student.storedFileName());
+    }
+
+    // ------------------------------------------------------------------------
+    // Downloading (FR-13)
+    // ------------------------------------------------------------------------
+
+    /**
+     * A student can download their own file, and it is served the way a stored PDF must be.
+     *
+     * <p>The headers are the assertion, not the bytes: a file rendered {@code inline} executes in
+     * this application's origin, which is why the response must be an {@code attachment} with a
+     * fixed media type ({@code CLAUDE.md} §7 rule 10). The body is checked too, so a 200 with an
+     * empty file does not pass.
+     */
+    @Test
+    void servesAStudentsOwnFileAsAnAttachment() throws Exception {
+        SignedIn student = signedInWithSubmission("download-own", "My own work");
+
+        mockMvc.perform(get("/submissions/" + student.submissionId() + "/file")
+                        .session(student.session()))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", containsString("attachment")))
+                .andExpect(header().string("Content-Disposition",
+                        containsString("download-own.pdf")))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(content().contentType(PDF))
+                .andExpect(content().bytes(PDF_BYTES));
+    }
+
+    /**
+     * A student cannot download another student's file, and the answer is the same 404 as for a
+     * submission they cannot see. The download inherits the ownership rule from the query that
+     * resolves the submission; it is asserted separately so a future change to the download route
+     * cannot quietly bypass it.
+     */
+    @Test
+    void refusesToDownloadAnotherStudentsFile() throws Exception {
+        SignedIn owner = signedInWithSubmission("download-owner", "First student's essay");
+        SignedIn other = signedInWithSubmission("download-other", "Second student's essay");
+
+        mockMvc.perform(get("/submissions/" + owner.submissionId() + "/file")
+                        .session(other.session()))
+                .andExpect(status().isNotFound());
     }
 
     // ------------------------------------------------------------------------

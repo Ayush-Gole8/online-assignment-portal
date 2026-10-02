@@ -52,6 +52,18 @@ class ApplicationContextIT extends MySqlIntegrationTest {
                     UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), ?, ?, 0)
             """;
 
+    /**
+     * Inserts a status-history row directly, for the same reason {@link #INSERT_SUBMISSION} does:
+     * {@code SubmissionStatusHistory} has no setter and its factories only ever produce the two
+     * shapes the service writes, so the database's own refusals can only be reached by handing it
+     * something the entity cannot express.
+     */
+    private static final String INSERT_HISTORY = """
+            INSERT INTO submission_status_history
+                (id, submission_id, from_status, to_status, actor_id, note, created_at)
+            VALUES (?, ?, ?, ?, ?, NULL, UTC_TIMESTAMP(6))
+            """;
+
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -174,8 +186,13 @@ class ApplicationContextIT extends MySqlIntegrationTest {
     void rejectsAStatusOutsideTheEnumVocabulary() {
         String studentId = aStudent();
 
-        Throwable thrown = catchThrowable(() ->
-                insertSubmission(studentId, "a-valid-name", 1024L, "PENDING", null, null));
+        // The decision columns are populated and consistent with a non-SUBMITTED row, so
+        // ck_submissions_decision is satisfied and ck_submissions_status is the only constraint
+        // this probe can violate. Leaving them null would break both, and MySQL reports whichever
+        // it happens to evaluate first — which is how this test once failed naming
+        // ck_submissions_decision and looked like a different bug.
+        Throwable thrown = catchThrowable(() -> insertSubmission(
+                studentId, "a-valid-name", 1024L, "PENDING", Instant.now(), aStudent()));
 
         assertThat(thrown).isInstanceOf(DataAccessException.class);
         assertThat(thrown.getMessage()).contains("ck_submissions_status");
@@ -235,6 +252,87 @@ class ApplicationContextIT extends MySqlIntegrationTest {
     }
 
     // ------------------------------------------------------------------------
+    // The status-history schema (V3)
+    // ------------------------------------------------------------------------
+
+    @Test
+    void appliesTheStatusHistoryMigration() {
+        assertThat(tableExists("submission_status_history")).isTrue();
+    }
+
+    /**
+     * Both status columns admit only the three lifecycle states — the same vocabulary
+     * {@code ck_submissions_status} enforces on the submission row.
+     *
+     * <p>An out-of-vocabulary value could only arrive from a bug: the entity writes the enum's name.
+     * The constraint is the backstop that turns such a bug into a refused insert rather than a row
+     * whose status no code can interpret.
+     */
+    @Test
+    void rejectsAHistoryStatusOutsideTheEnumVocabulary() {
+        String submissionId = aSubmission(aStudent());
+
+        Throwable badTarget = catchThrowable(() ->
+                insertHistory(submissionId, "SUBMITTED", "PENDING", aStudent()));
+        assertThat(badTarget).isInstanceOf(DataAccessException.class);
+        assertThat(badTarget.getMessage()).contains("ck_submission_status_history_to_status");
+
+        Throwable badSource = catchThrowable(() ->
+                insertHistory(submissionId, "PENDING", "APPROVED", aStudent()));
+        assertThat(badSource).isInstanceOf(DataAccessException.class);
+        assertThat(badSource.getMessage()).contains("ck_submission_status_history_from_status");
+    }
+
+    /**
+     * The creation row is the only one whose {@code from_status} may be null, and a null there is
+     * meaningful rather than missing: it marks the start of the lifecycle.
+     */
+    @Test
+    void acceptsANullFromStatus_forTheCreationRow() {
+        String submissionId = aSubmission(aStudent());
+
+        insertHistory(submissionId, null, "SUBMITTED", aStudent());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM submission_status_history WHERE submission_id = ?",
+                Integer.class, submissionId))
+                .isEqualTo(1);
+    }
+
+    /** A history row with no actor is an untraceable transition — the thing the table exists to prevent. */
+    @Test
+    void rejectsAHistoryRowWithNoActor() {
+        String submissionId = aSubmission(aStudent());
+
+        Throwable thrown = catchThrowable(() ->
+                insertHistory(submissionId, "SUBMITTED", "APPROVED", null));
+
+        assertThat(thrown).isInstanceOf(DataAccessException.class);
+    }
+
+    /** A history row whose actor is not a real user is refused by the foreign key. */
+    @Test
+    void rejectsAHistoryRowForAnActorThatDoesNotExist() {
+        String submissionId = aSubmission(aStudent());
+
+        Throwable thrown = catchThrowable(() -> insertHistory(
+                submissionId, "SUBMITTED", "APPROVED", UUID.randomUUID().toString()));
+
+        assertThat(thrown).isInstanceOf(DataAccessException.class);
+        assertThat(thrown.getMessage()).contains("fk_submission_status_history_actor_id");
+    }
+
+    /** History describes a submission, so it cannot point at one that does not exist. */
+    @Test
+    void rejectsAHistoryRowForASubmissionThatDoesNotExist() {
+        Throwable thrown = catchThrowable(() -> insertHistory(
+                UUID.randomUUID().toString(), null, "SUBMITTED", aStudent()));
+
+        assertThat(thrown).isInstanceOf(DataAccessException.class);
+        assertThat(thrown.getMessage()).contains("fk_submission_status_history_submission_id");
+    }
+
+    // ------------------------------------------------------------------------
     // Support
     // ------------------------------------------------------------------------
 
@@ -258,6 +356,35 @@ class ApplicationContextIT extends MySqlIntegrationTest {
     private void insertSubmission(String studentId, long fileSizeBytes) {
         insertSubmission(studentId, UUID.randomUUID().toString(), fileSizeBytes, "SUBMITTED",
                 null, null);
+    }
+
+    /** Creates an undecided submission owned by {@code studentId} and returns its identifier. */
+    private String aSubmission(String studentId) {
+        String submissionId = UUID.randomUUID().toString();
+        jdbcTemplate.update(INSERT_SUBMISSION,
+                submissionId,
+                studentId,
+                UUID.randomUUID().toString(),
+                1024L,
+                "0".repeat(64),
+                "SUBMITTED",
+                null,
+                null);
+        return submissionId;
+    }
+
+    /**
+     * @param fromStatus the previous status, or {@code null} for a creation row
+     * @param actorId    the acting user, or {@code null} to prove the column refuses it
+     */
+    private void insertHistory(String submissionId, String fromStatus, String toStatus,
+                               String actorId) {
+        jdbcTemplate.update(INSERT_HISTORY,
+                UUID.randomUUID().toString(),
+                submissionId,
+                fromStatus,
+                toStatus,
+                actorId);
     }
 
     /**

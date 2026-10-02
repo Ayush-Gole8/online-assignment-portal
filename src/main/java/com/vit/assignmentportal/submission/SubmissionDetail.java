@@ -21,10 +21,9 @@ import java.util.UUID;
  * @param status           the current lifecycle state
  * @param createdAt        when the work was handed in
  * @param updatedAt        when the row last changed
- * @param reviewedAt       when a reviewer decided, or {@code null} while none has. Always
- *                         {@code null} in this milestone — the review feature sets it
- * @param rejectionReason  why a reviewer refused the work, or {@code null}. Always {@code null}
- *                         in this milestone
+ * @param reviewedAt       when a reviewer decided, or {@code null} while none has
+ * @param rejectionReason  why a reviewer refused the work, or {@code null} when it was approved or
+ *                         is still undecided
  */
 public record SubmissionDetail(
         UUID id,
