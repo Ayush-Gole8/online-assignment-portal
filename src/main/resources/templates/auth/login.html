@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--
+<!--/*
   The sign-in page (ADR-005).
 
   Two things about this file are load-bearing rather than cosmetic:
@@ -17,56 +17,71 @@
 
   The failure message is deliberately one sentence that does not say whether the
   address is registered. See AuthController.
--->
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
+
+  Signed-out and failed-sign-in notices are not flash attributes here — they arrive as
+  query parameters Spring Security appends to the redirect, and AuthController turns them
+  into booleans. They are passed to the same alert fragment the rest of the application
+  uses, so a refusal reads the same wherever it appears.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{fragments/layout-auth :: page(~{::title}, ~{::section})}">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Sign in — Online Assignment Portal</title>
-    <link rel="stylesheet" th:href="@{/css/portal.css}">
 </head>
-<body class="centered">
+<body>
 
-<main class="card">
-    <h1>Online Assignment Portal</h1>
-    <p class="subtitle">Sign in to continue</p>
+<section class="row justify-content-center">
+    <div class="col-12 col-sm-10 col-md-7 col-lg-5">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
 
-    <!-- Present after a failed attempt. Spring Security redirects to /login?error. -->
-    <p class="notice notice-error" th:if="${signInFailed}" role="alert">
-        Those credentials were not accepted. Please try again.
-    </p>
+                <h1 class="h4 mb-1">Online Assignment Portal</h1>
+                <p class="text-body-secondary">Sign in to continue</p>
 
-    <!-- Present after a successful sign-out. Spring Security redirects to /login?logout. -->
-    <p class="notice notice-success" th:if="${signedOut}" role="status">
-        You have been signed out.
-    </p>
+                <!--/* Present after a failed attempt. Spring Security redirects to /login?error. */-->
+                <div th:replace="~{fragments/flash :: alert('danger',
+                        ${signInFailed} ? 'Those credentials were not accepted. Please try again.' : null)}"></div>
 
-    <form th:action="@{/login}" method="post">
-        <label for="email">Email</label>
-        <!--
-          autocomplete="username" so a password manager fills it: this IS the username,
-          whatever the field is called. The `type` is `text` rather than `email` because
-          HTML5 validation would block a non-address before the server sees it, and the
-          server is where the decision belongs — client-side checks are a convenience and
-          never a control (CLAUDE.md §7).
-        -->
-        <input type="text"
-               id="email"
-               name="email"
-               autocomplete="username"
-               autofocus
-               required>
+                <!--/* Present after a successful sign-out. Spring Security redirects to /login?logout. */-->
+                <div th:replace="~{fragments/flash :: alert('success',
+                        ${signedOut} ? 'You have been signed out.' : null)}"></div>
 
-        <label for="password">Password</label>
-        <input type="password"
-               id="password"
-               name="password"
-               autocomplete="current-password"
-               required>
+                <form th:action="@{/login}" method="post">
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email</label>
+                        <!--/*
+                          autocomplete="username" so a password manager fills it: this IS the
+                          username, whatever the field is called. The `type` is `text` rather
+                          than `email` because HTML5 validation would block a non-address before
+                          the server sees it, and the server is where the decision belongs —
+                          client-side checks are a convenience and never a control (CLAUDE.md §7).
+                        */-->
+                        <input type="text"
+                               class="form-control"
+                               id="email"
+                               name="email"
+                               autocomplete="username"
+                               autofocus
+                               required>
+                    </div>
 
-        <button type="submit">Sign in</button>
-    </form>
-</main>
+                    <div class="mb-4">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password"
+                               class="form-control"
+                               id="password"
+                               name="password"
+                               autocomplete="current-password"
+                               required>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">Sign in</button>
+                </form>
+
+            </div>
+        </div>
+    </div>
+</section>
 
 </body>
 </html>

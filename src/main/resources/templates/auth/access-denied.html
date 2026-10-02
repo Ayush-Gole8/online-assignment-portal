@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--
+<!--/*
   The 403 page, reached by a server-side forward from Spring Security's
   AccessDeniedHandlerImpl (see SecurityConfiguration#accessDeniedPage).
 
@@ -10,32 +10,40 @@
   would not grant the missing role.
 
   The response status is 403, set by the handler before the forward.
--->
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
+
+  It uses the SIGNED-IN layout, because the reader is signed in. AuthController puts the
+  current user into the model for exactly this reason, so the header shows who they are
+  and offers a working sign-out rather than a "Sign in" button to somebody who already is.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Not permitted — Online Assignment Portal</title>
-    <link rel="stylesheet" th:href="@{/css/portal.css}">
 </head>
-<body class="centered">
+<body>
 
-<main class="card">
-    <h1>Not permitted</h1>
+<section class="row justify-content-center">
+    <div class="col-12 col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-body p-4">
+                <h1 class="h4">Not permitted</h1>
 
-    <p>
-        Your account does not have the role required to view that page.
-    </p>
+                <p>
+                    Your account does not have the role required to view that page.
+                </p>
 
-    <p class="muted">
-        Signing in again will not change this. If you believe you should have access,
-        ask an administrator to review the role on your account.
-    </p>
+                <p class="text-body-secondary">
+                    Signing in again will not change this. If you believe you should have access,
+                    ask an administrator to review the role on your account.
+                </p>
 
-    <!-- th:href so the context path is prepended when the application is not deployed
-         at the root. -->
-    <a th:href="@{/}" class="button-link">Return to your home page</a>
-</main>
+                <!--/* th:href so the context path is prepended when the application is not
+                     deployed at the root. */-->
+                <a th:href="@{/}" class="btn btn-primary">Return to your home page</a>
+            </div>
+        </div>
+    </div>
+</section>
 
 </body>
 </html>

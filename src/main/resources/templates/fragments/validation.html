@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!--/*
+  The per-field half of the validation surface.
+
+  This application validates on the server and always has: the upload is checked by
+  FileValidationService and SubmissionService, and the decision by ReviewService. Nothing
+  here decides whether input is acceptable — it decides only WHERE an already-decided
+  refusal is shown. A template that could refuse a submission would be a rule in a view,
+  and a rule in a view is a rule somebody can turn off (CLAUDE.md §7 rule 4).
+
+  Used as:
+
+      <input id="title" name="title"
+             th:attr="aria-invalid=${errorField == 'title' ? 'true' : null},
+                      aria-describedby=${errorField == 'title' ? 'title-error' : null}">
+      <p th:replace="~{fragments/validation :: fieldError('title', ${error}, ${errorField})}"></p>
+
+  The controller flashes `errorField` alongside `error` when the refusal names one input,
+  so the sentence lands under the field it is about rather than at the top of the page.
+  When the refusal is about the upload as a whole — a file that is not a PDF — `errorField`
+  is null, this fragment renders nothing, and the page's flash alert carries the message.
+
+  `aria-invalid` and `aria-describedby` are set on the input by the page, not here, because
+  an attribute on a <p> would not reach the control. The id this fragment emits and the id
+  the input points at are the same string, built the same way — `field + '-error'` — so the
+  two cannot drift apart into a described-by that names nothing.
+
+  `d-block` on the message: `.invalid-feedback` is display:none until a sibling is marked
+  invalid, a rule that exists for Bootstrap's own JavaScript path. With scripting off the
+  message would never appear, so it is forced visible.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fragment</title>
+</head>
+<body>
+
+<p th:fragment="fieldError(field, message, errorField)"
+   th:if="${errorField == field and message != null and !#strings.isEmpty(message)}"
+   th:id="${field + '-error'}"
+   class="invalid-feedback d-block"
+   th:text="${message}">This field is required.</p>
+
+</body>
+</html>

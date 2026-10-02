@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--/*
+  The document skeleton for the pages that are reached WITHOUT a session — the sign-in
+  page and the error page.
+
+  A second file rather than a third parameter on fragments/layout.html, because the two
+  differ in more than a body class: this one has no navigation and no "signed in as"
+  control, and it centres its content rather than filling the viewport with it. Forcing
+  both into one fragment would mean a fragment whose body is mostly conditionals — which
+  is how a layout becomes harder to read than the pages it lays out.
+
+  It shares the footer, the stylesheet links, and the skip link with the signed-in
+  layout, so what is genuinely common is still written once.
+
+  Used as:
+
+      <html th:replace="~{fragments/layout-auth :: page(~{::title}, ~{::section})}">
+
+  The parameters are named `pageTitle` and `pageContent` for the reason set out at length
+  in fragments/layout.html: a fragment parameter is a local variable over everything the
+  fragment splices in, so an ordinary domain name like `title` would shadow a model
+  attribute of the same name in the page below. Both layouts use the same names so the
+  trap is closed in one place rather than remembered per file.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en" th:fragment="page(pageTitle, pageContent)">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:replace="${pageTitle}">Online Assignment Portal</title>
+    <link rel="stylesheet" th:href="@{/css/bootstrap.min.css}">
+    <link rel="stylesheet" th:href="@{/css/portal.css}">
+</head>
+<body class="d-flex flex-column min-vh-100 bg-body-tertiary">
+
+<a class="visually-hidden-focusable" href="#main-content">Skip to main content</a>
+
+<main id="main-content"
+      class="container flex-grow-1 d-flex flex-column justify-content-center py-5"
+      th:insert="${pageContent}"></main>
+
+<footer th:replace="~{fragments/footer :: footer}"></footer>
+
+</body>
+</html>

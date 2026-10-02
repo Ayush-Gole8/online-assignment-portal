@@ -23,6 +23,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 @Controller
 public class AuthController {
 
+    private final CurrentUserService currentUserService;
+
+    public AuthController(CurrentUserService currentUserService) {
+        this.currentUserService = currentUserService;
+    }
+
     /**
      * The sign-in page.
      *
@@ -64,9 +70,17 @@ public class AuthController {
      *
      * <p>A forward, not a redirect: a redirect would replace the 403 with a 200 and would lose
      * the fact that access was refused, which is precisely the signal a browser test asserts on.
+     *
+     * <p>The current user is put in the model so the page can be built on the signed-in layout —
+     * the reader <em>is</em> signed in, and offering them a "Sign in" button, or no sign-out, would
+     * describe their session incorrectly. It is read as an {@code Optional} rather than required:
+     * the handler is reachable by a direct request as well as by the forward, and a page that
+     * explains a refusal should render even if that request arrives without a principal.
      */
     @GetMapping("/access-denied")
-    public String accessDenied() {
+    public String accessDenied(Model model) {
+        model.addAttribute("currentUser",
+                currentUserService.currentUser().map(CurrentUserView::from).orElse(null));
         return "auth/access-denied";
     }
 }

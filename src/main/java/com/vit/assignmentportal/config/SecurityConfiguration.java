@@ -97,6 +97,20 @@ public class SecurityConfiguration {
                         //    Role.authority().
                         // ------------------------------------------------------------------
                         .requestMatchers("/review", "/review/**").hasAnyRole("REVIEWER", "ADMIN")
+
+                        // The student's own area: the dashboard, the upload form, the list, and the
+                        // individual submission — including its file download. STUDENT only, so a
+                        // REVIEWER or an ADMIN is refused here rather than being shown a page whose
+                        // every link is scoped to "my work" that is not theirs.
+                        //
+                        // Listed as three patterns for the same reason the review rule lists two:
+                        // `/submissions/**` covers the sub-paths, and the bare `/submissions` — the
+                        // list, and the POST that creates a submission — is named so that whether a
+                        // trailing `**` matches the empty remainder never decides the policy.
+                        // `/student/**` needs no bare form; there is no page at `/student` itself.
+                        .requestMatchers("/student/**", "/submissions", "/submissions/**")
+                        .hasRole("STUDENT")
+
                         .requestMatchers("/admin/**").hasRole("ADMIN")
 
                         // ------------------------------------------------------------------

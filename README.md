@@ -16,9 +16,17 @@ The application is deliberately modest. The engineering objective of this reposi
 > transition, **optimistic locking** so two reviewers cannot silently overwrite one another, and
 > **file download** for both the owner and the reviewer.
 >
-> **No suite has run to green since Milestone 2.** As of 2026-10-02 the build compiles all 40 main
-> sources and reaches test compilation; the tests added by Milestones 3 and 4 have never been
-> executed. Treat both milestones as written but unproven.
+> **The integration suite now executes — and the three real defects it found are fixed and
+> unverified.** Three runs on 2026-10-02, each informative. The first had **no Docker daemon**: all
+> 112 integration tests aborted at class initialisation, so nothing in Milestones 3 or 4 was
+> reached. The second ran with Docker up: **60 unit tests green, 112 integration tests executed, 2
+> failures, 0 errors.** Both were genuine defects — a Thymeleaf fragment-parameter collision that
+> stopped a refused upload being handed back to the student, and a test that drove Spring Boot's
+> error controller through its JSON handler and then asserted on an HTML view that was never
+> resolved. The third ran the suite again — **113 tests, 1 failure** — and that failure was a third
+> defect: the templates were shipping their own engineering comments to the browser, including the
+> error page's notes naming `BasicErrorController` and `SecurityConfiguration`. **The last fully
+> green build is still Milestone 2's.**
 >
 > **Not yet present — deliberately:** the audit trail (FR-24), any form of resubmission, an admin UI
 > beyond the role gate, and the delivery pipeline itself — no `Dockerfile`, no `Jenkinsfile`, no
@@ -58,23 +66,39 @@ their own history sees what happened and when, but not who decided it.
 
 | Method & path | Who | What it does |
 | --- | --- | --- |
-| `GET /` | any signed-in user | Home page |
+| `GET /` | any signed-in user | Home page, with links to the actions the role may take |
 | `GET /login`, `POST /login` | anonymous | Form sign-in |
 | `POST /logout` | signed-in | Sign out, invalidating the session server-side |
-| `GET /submissions` | `STUDENT` | The signed-in student's own submissions, newest first |
+| `GET /student/dashboard` | `STUDENT` | Own counts by status, and the most recent few |
+| `GET /submissions` | `STUDENT` | The signed-in student's own submissions, newest first, paged |
 | `GET /submissions/new`, `POST /submissions` | `STUDENT` | Upload one PDF |
 | `GET /submissions/{id}` | `STUDENT` | One own submission: status, decision, reason, history |
 | `GET /submissions/{id}/file` | `STUDENT` | Download one's own file, as an attachment |
-| `GET /review` | `REVIEWER`, `ADMIN` | Queue of submissions awaiting a decision, oldest first |
+| `GET /review`, `GET /review/queue` | `REVIEWER`, `ADMIN` | Queue of submissions awaiting a decision, oldest first, paged |
 | `GET /review/submissions/{id}` | `REVIEWER`, `ADMIN` | One submission, with its history and the decision form |
 | `POST /review/submissions/{id}` | `REVIEWER`, `ADMIN` | Record one terminal decision |
 | `GET /review/submissions/{id}/file` | `REVIEWER`, `ADMIN` | Download the artefact |
+| `GET /access-denied` | signed-in | Shown when an authenticated user lacks the role a route requires |
+| `GET /error` | anonymous | The page every unhandled failure renders as — status only |
 | `GET /actuator/health` | anonymous | Liveness — status only, no details |
 
 Authorisation is a route rule in the security filter chain, not a check inside a handler. A student
 reaching another student's submission gets **404**, not **403** — "not yours" and "not there" are
 deliberately the same answer, so the endpoint cannot be used to discover which identifiers exist.
 Uploaded files are always served as attachments with a fixed content type, never rendered inline.
+`/submissions/**` and `/student/**` are `STUDENT` only; `/review/**` is `REVIEWER` or `ADMIN`; a
+signed-in user refused a route is shown `/access-denied` with a 403, rather than being sent round a
+sign-in loop that cannot grant the missing role.
+
+### Pages
+
+Server-rendered Thymeleaf, Bootstrap-based and responsive, with **no JavaScript** — every flow
+completes with scripting disabled. The pages share four fragments (`layout`, `navbar`, `flash`,
+`footer`) plus `validation`, `status`, and `pagination`, so the navigation and the sign-out form are
+written once. Forms carry accessible labels and are keyboard-operable; server-side validation is the
+control, and a browser's own checks are a convenience layered over it. See
+[`docs/evidence/ui-screenshots.md`](docs/evidence/ui-screenshots.md) for the screenshots that must be
+captured to evidence the UI.
 
 ## Technology stack
 
@@ -264,30 +288,98 @@ Entry criteria: [`CLAUDE.md` §13](CLAUDE.md#13-next-milestone-readiness).
 failures. That run predates every file Milestones 3 and 4 added, so it is evidence for the milestones
 behind us and for nothing in the two in front of us.
 
-Since then the build has been run and has moved forward: on **2026-10-02** it compiled **all 40 main
-sources** and reached **test compilation**, where it stopped on a single error. That error has been
-fixed but the build has **not been re-run**, and **no test has executed**. As of 2026-10-02:
+The build has since been re-run **three times** on **2026-10-02**, and between them the three runs
+tell the whole story.
+
+**Run 1 — reached test execution, no Docker daemon.** Both source sets compiled (observed, not
+assumed: Failsafe discovered and reported all 112 integration tests individually, which it cannot do
+unless test compilation succeeded at this revision) and the **unit suite passed — 60 tests, 0
+failures, 0 errors, 0 skipped**, including Milestone 4's own `ReviewControllerTest` (5) and
+`SubmissionControllerTest` (3). The **integration suite then aborted entirely**: all 112 tests across
+10 classes errored at *class initialisation*, before any test body ran, with the root cause printed
+once on the first test of the first class:
+
+```
+Caused by: java.lang.IllegalStateException: Could not find a valid Docker environment.
+    at org.testcontainers.containers.GenericContainer.start(GenericContainer.java:316)
+    at com.vit.assignmentportal.MySqlIntegrationTest.<clinit>(MySqlIntegrationTest.java:59)
+```
+
+`MySqlIntegrationTest` starts its shared MySQL 8.4 container in a static initialiser; with no engine
+reachable that initialiser throws, the class is poisoned for the rest of the JVM, and every subclass
+fails with `NoClassDefFoundError: Could not initialize class …` — which is what the other 111 errors
+are. **Not one line of the code under test was reached.**
+
+**Run 2 — Docker up, and the suite finally executed: 112 tests, 2 failures, 0 errors.** Both
+failures were **real defects in the Milestone 3/4 work described below**, and both have been fixed:
+
+| Test | Symptom | Cause |
+| --- | --- | --- |
+| `SubmissionUploadIT.returnsTheEnteredMetadataToTheFormAfterARefusal` | A refused upload came back with the Title field set to the *page's own* `<title>` text instead of what the student typed | `fragments/layout.html` declared `th:fragment="page(title, body)"`. A fragment parameter is a local variable over everything `th:insert` splices in, so `${title}` in `upload.html` resolved to the parameter rather than the flashed model attribute |
+| `UiRenderingIT.rendersTheErrorPageWithoutExposingInternals` | `No ModelAndView found` — a JSON body, not the error page | A bare `GET /error` has no `Accept` header, so `BasicErrorController` chose its JSON handler; the test then asserted on an HTML view that was never resolved |
+
+**Run 3 — both fixes confirmed, and a third defect found: 113 tests, 1 failure, 0 errors.** The two
+run-2 defects are gone. The count rose by one because the error-page test was split into a 500 case
+and a 404 case. The remaining failure was the most instructive of the three, because an assertion
+written to look for something else found it: `rendersTheErrorPageWithoutExposingInternals` asserts
+the page does not contain the word "exception", and it did — because `error.html`'s own comment
+saying "an exception that reaches the container" was being **served to the browser**. Thymeleaf emits
+an ordinary HTML comment verbatim: `<!-- … -->` is content, not whitespace. Every page was shipping
+its engineering notes, and the error page's notes name `BasicErrorController` and
+`SecurityConfiguration` — the disclosure `CLAUDE.md` §7 rule 11 forbids, on the page an anonymous
+visitor is most likely to reach. Fixed by writing every comment that can reach a browser as a
+Thymeleaf **parser-level** comment, which the parser discards before rendering: 51 comments across 18
+of the 19 template files. The assertion was **not** relaxed — it now passes because nothing reaches
+the browser, and a new `shipsNoTemplateCommentaryToTheBrowser` test enforces the rule on its own
+terms.
+
+**None of the three fixes has been re-run.** Everything below describes run 3's state; the repaired
+tests are what stands between this revision and a green build.
+
+As of 2026-10-02:
 
 | Claim | Status |
 | --- | --- |
-| `./mvnw clean verify` passes **at this revision** | **Not run** — the last green run was Milestone 2 |
-| All 40 main sources compile | **Observed** on 2026-10-02, at the revision current then |
-| All test sources compile | **Not confirmed** — the run stopped at one test error, since fixed |
-| The storage and submission unit tests pass | **Not run** |
-| The upload, access-isolation, and failure-handling ITs pass | **Not run** |
-| `ApplicationContextIT` passes with the `submissions` and `submission_status_history` constraints | **Not run** — the recorded run executed the 5-test Milestone 2 version |
-| The reviewer workflow IT and the decision-handler unit test pass | **Not run** — written, never compiled |
-| The two-reviewer concurrency IT refuses the loser | **Not run** — written, never compiled |
+| `./mvnw clean verify` passes **at this revision** | **Failed** — run 3: the unit suite was green and 113 integration tests executed, 1 failing. All three defects it found are fixed and unverified. The last *green* run remains Milestone 2's |
+| All main sources compile | **Observed** — both runs compiled both source sets at this revision |
+| All test sources compile | **Observed** — Failsafe reported all 112 integration tests individually in runs 1 and 2, and all 113 in run 3 |
+| The storage unit tests pass | **Passed** — 47 tests across `ChecksumServiceTest`, `FileValidationServiceTest`, `StorageIdentifierTest`, `StorageServiceTest` |
+| The submission and review unit tests pass | **Passed** — `SubmissionControllerTest` (3) and `ReviewControllerTest` (5) are green |
+| The upload, access-isolation, and failure-handling ITs pass | **Passed** — run 3 reported the previously failing "hand the typed metadata back" case green |
+| `ApplicationContextIT` passes with the `submissions` and `submission_status_history` constraints | **Passed** — 17 tests, including the constraint probes |
+| The reviewer workflow IT passes | **Passed** — `ReviewWorkflowIT`, 17 tests |
+| The two-reviewer concurrency IT refuses the loser | **Passed** — `SubmissionConcurrencyIT` |
+| The dashboard IT serves, isolates, and refuses a reviewer | **Passed** — `StudentDashboardIT`, 6 tests |
+| The UI rendering IT finds no script, the vendored stylesheets, and the error page | **One failure in run 3** — the error-page case, on the word "exception" inside a template comment that was being served to the browser. Fixed; the no-script, stylesheet, navigation and sign-out cases passed, and the new no-comment case has not run |
+| The full workflow completes with JavaScript disabled | **Partly observed** — `UiRenderingIT.rendersNoScriptOnAnyStudentPage` passed across every student page |
+| The vendored `bootstrap.min.css` is present and served | **Not run** — the file is not yet in the tree (see below) |
 | Spring Boot 4.1.1 and the starter coordinates resolve | **Verified** — the parent resolves, the JAR is repackaged, the context boots |
-| `V1__baseline.sql` applies and `users` accepts the documented roles | **Verified** by the recorded `ApplicationContextIT` |
+| `V1__baseline.sql` applies and `users` accepts the documented roles | **Verified** by the recorded `ApplicationContextIT` (Milestone 2 revision) |
 | Authentication and route rules behave as documented | **Verified** by the recorded `AuthenticationIT` (11) and `AuthorizationIT` (14) |
-| `deploy/docker-compose.yml` brings MySQL up healthy | **Not run** — the tests use a Testcontainers MySQL 8.4.11 instead |
+| `deploy/docker-compose.yml` brings MySQL up healthy | **Not run** — the tests use a Testcontainers MySQL rather than the Compose service |
 | The application serves `/actuator/health` | **Not run** |
 | A real browser can complete a workflow | **Not run** — Selenium is not a dependency yet |
 
 Design intent is recorded and reviewable; behaviour counts as evidence only where a run is named
 above. [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine)
 lists the gaps and how to close each one.
+
+### One outstanding asset
+
+The UI is built on **Bootstrap 5.3.3's stylesheet, vendored** at
+`src/main/resources/static/css/bootstrap.min.css` rather than linked from a CDN, so pages render
+identically on a build agent with no route to the public internet. That file has **not been added to
+the tree yet** — the sandbox this work was done in blocked the download. Until it is fetched, the
+templates will render unprovided Bootstrap class names as no styling at all: the pages remain
+correct and fully usable, but not laid out.
+
+```bash
+curl -sSL -o src/main/resources/static/css/bootstrap.min.css \
+  https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css
+```
+
+Nothing else in the UI depends on that step; it is the only file the templates reference that is not
+already committed.
 
 ## License
 

@@ -1,65 +1,76 @@
 <!DOCTYPE html>
-<!--
+<!--/*
   The reviewer's queue: submissions waiting for a decision (FR-16).
 
-  `submissions` is a List<SubmissionSummary> — read models, never Submission entities.
-  The list contains only rows still in SUBMITTED: the query in SubmissionRepository
+  `submissions` is a Page<SubmissionSummary> — read models, never Submission entities.
+  The page contains only rows still in SUBMITTED: the query in SubmissionRepository
   filters by status, so an already-decided submission is never handed to this page and
-  cannot be rendered as if it were waiting.
+  cannot be rendered as if it were waiting. The paging is the same filtered query with a
+  limit on it, so it cannot widen the result either.
 
   Reaching this page is restricted by SecurityConfiguration: /review/** requires REVIEWER
   or ADMIN. The page renders the same for both, because an ADMIN's decision is recorded
   exactly as a REVIEWER's.
 
+  THE EMPTY STATE MATTERS MORE HERE THAN ANYWHERE ELSE. A reviewer's queue is empty every
+  time it has been worked through to the end, which is the normal, healthy state — so it
+  is stated as a fact rather than shown as an empty table, which reads as a failure to
+  load.
+
   Model attributes:
-    currentUser  CurrentUserView          — for the header fragment
-    submissions  List<SubmissionSummary>
--->
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
+    currentUser  CurrentUserView          — for the navigation fragment
+    submissions  Page<SubmissionSummary>
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Review queue — Online Assignment Portal</title>
-    <link rel="stylesheet" th:href="@{/css/portal.css}">
 </head>
 <body>
 
-<header th:replace="~{fragments/portal-header :: header}"></header>
+<section>
+    <h1 class="h3">Review queue</h1>
+    <p class="text-body-secondary">Submissions waiting for a decision, longest waiting first.</p>
 
-<main class="card card-wide">
-    <h1>Review queue</h1>
-    <p class="subtitle">Submissions waiting for a decision, longest waiting first.</p>
+    <div class="card" th:if="${submissions.numberOfElements == 0}">
+        <div class="card-body text-center py-5">
+            <p class="mb-0">Nothing is waiting for review.</p>
+        </div>
+    </div>
 
-    <!-- The empty state is a sentence, not an empty table: a table with headers and no
-         rows reads as a loading failure. -->
-    <p class="muted" th:if="${#lists.isEmpty(submissions)}">
-        Nothing is waiting for review.
-    </p>
+    <div class="card" th:unless="${submissions.numberOfElements == 0}">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <caption class="visually-hidden">Submissions awaiting a decision, oldest first</caption>
+                <thead>
+                <tr>
+                    <th scope="col">Title</th>
+                    <th scope="col">Course</th>
+                    <th scope="col">File</th>
+                    <th scope="col">Submitted</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="submission : ${submissions}">
+                    <td>
+                        <!--/* The link carries only the identifier; the reviewer's detail handler is
+                             what authorises the request, by role at the route. */-->
+                        <a th:href="@{/review/submissions/{id}(id=${submission.id})}"
+                           th:text="${submission.title}">Coursework</a>
+                    </td>
+                    <td th:text="${submission.courseCode}">CS101</td>
+                    <td th:text="${submission.originalFileName}">essay.pdf</td>
+                    <td class="text-body-secondary" th:text="${submission.submittedOn()}">1 Oct 2026, 09:15 UTC</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
 
-    <table class="listing" th:unless="${#lists.isEmpty(submissions)}">
-        <thead>
-        <tr>
-            <th scope="col">Title</th>
-            <th scope="col">Course</th>
-            <th scope="col">File</th>
-            <th scope="col">Submitted</th>
-        </tr>
-        </thead>
-        <tbody>
-        <tr th:each="submission : ${submissions}">
-            <td>
-                <!-- The link carries only the identifier; the reviewer's detail handler is
-                     what authorises the request, by role at the route. -->
-                <a th:href="@{/review/submissions/{id}(id=${submission.id})}"
-                   th:text="${submission.title}">Coursework</a>
-            </td>
-            <td th:text="${submission.courseCode}">CS101</td>
-            <td th:text="${submission.originalFileName}">essay.pdf</td>
-            <td th:text="${submission.submittedOn()}">1 Oct 2026, 09:15 UTC</td>
-        </tr>
-        </tbody>
-    </table>
-</main>
+    <div class="mt-3">
+        <nav th:replace="~{fragments/pagination :: paginate(${submissions}, '/review/queue')}"></nav>
+    </div>
+</section>
 
 </body>
 </html>

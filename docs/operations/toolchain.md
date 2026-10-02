@@ -110,17 +110,88 @@ docker compose version
 
 ## 9. Outstanding gaps on this machine
 
-Recorded 2026-10-01 from the output of an actual `mvn clean verify` run, and revised after the
-Milestone 2 run of the same day. This section describes **observed** state, not expected state.
+Recorded 2026-10-01 from the output of an actual `mvn clean verify` run, revised after the
+Milestone 2 run of the same day, and revised again after the three **2026-10-02** runs. This section
+describes **observed** state, not expected state.
 
-That run **compiled both source sets, packaged the Spring Boot JAR, started the Spring context,
-and ran 30 integration tests and 5 unit tests against a real MySQL 8.4.11 container — all
-passing.** Two gaps remain.
+The Milestone 2 run **compiled both source sets, packaged the Spring Boot JAR, started the Spring
+context, and ran 30 integration tests and 5 unit tests against a real MySQL 8.4.11 container — all
+passing.**
+
+**Three runs on 2026-10-02, and between them they moved this section on twice over.**
+
+**Run 1 — no Docker daemon.** Both source sets compiled and the **unit** suite passed — **60
+Surefire tests, 0 failures, 0 errors** — then the full **integration** suite was discovered, **112
+tests across 10 classes**, and **every one of the 112 errored at class initialisation**, before any
+test body ran:
+
+```
+Caused by: java.lang.IllegalStateException: Could not find a valid Docker environment.
+    at org.testcontainers.containers.GenericContainer.start(GenericContainer.java:316)
+    at com.vit.assignmentportal.MySqlIntegrationTest.<clinit>(MySqlIntegrationTest.java:59)
+```
+
+**Run 2 — Docker up, and the suite executed: 112 integration tests, 2 failures, 0 errors.** Both
+failures were real defects. Neither was environmental, and both had been invisible while run 1 was
+the most recent thing anyone had seen:
+
+- `SubmissionUploadIT` — a refused upload came back with the page's own `<title>` text in the Title
+  field. A Thymeleaf fragment parameter is a **local variable over everything the fragment splices
+  in**, so `layout.html`'s `page(title, body)` shadowed the flashed `title` model attribute that
+  `upload.html` renders through `th:value="${title}"`. Fixed by renaming the parameters
+  `pageTitle`/`pageContent`, which cannot collide with an ordinary domain noun.
+- `UiRenderingIT` — `GET /error` with no `Accept` header reaches `BasicErrorController`'s JSON
+  handler, so no view is resolved and the test failed on "No ModelAndView found" rather than on
+  anything about the page. Fixed by driving the request the way a container drives an error
+  dispatch: an `Accept: text/html` header and an `ERROR_STATUS_CODE` request attribute.
+
+**Run 3 — both fixes landed; 113 integration tests, 1 failure, 0 errors.** The two defects above are
+gone, and the count rose by one because the error-page test was split into a 500 case and a 404
+case. The remaining failure was a third real defect, found by an assertion written to look for
+something else — which is the most useful thing about it.
+
+`rendersTheErrorPageWithoutExposingInternals` asserts the rendered error page does not contain the
+word "exception". The page did:
+
+```text
+  it directly, and nothing has to route to it: a 404, a 500, or an exception that reaches
+  the container all end up here.
+```
+
+That is not page copy. It is `error.html`'s own explanatory comment. Thymeleaf emits an ordinary
+HTML comment verbatim into the response — `<!-- … -->` is **content**, not whitespace — so every
+page was shipping its engineering notes to every browser that opened it. On the error page those
+notes name `BasicErrorController`, `SecurityConfiguration`, and the `server.error.include-message:
+never` setting that keeps the failure message blank. Publishing a map of that machinery to an
+anonymous visitor is the disclosure `CLAUDE.md` §7 rule 11 forbids, on the one page an anonymous
+visitor is most likely to reach.
+
+Fixed by writing every comment that can reach a browser as a Thymeleaf **parser-level** comment,
+which the parser discards before rendering: 51 comments across 18 of the 19 template files.
+(`fragments/portal-header.html`, which nothing references, was left alone.) The assertion itself
+was left exactly as it was. It now passes because nothing reaches the browser, which is the right
+reason and the opposite of weakening the test to fit the output.
+
+Two gaps remain.
 
 | Gap | Why it matters | How to close it |
 | --- | --- | --- |
-| **No build has run since Milestone 3 was written — and Milestone 4 has since been added on top.** | Every storage, submission, and review test is unexecuted. `ApplicationContextIT` has grown again, and the review suite (`ReviewWorkflowIT`, `ReviewControllerTest`, `SubmissionConcurrencyIT`) has never been compiled, let alone run. The last green run proves the two milestones *behind* us, not either of the two in front of us. | `./mvnw clean verify` with the Docker daemon running, then record the outcome here and under `docs/evidence/`. |
+| **The run-3 fix is written but not re-run.** | Comments are now parser-level, so nothing should reach the browser — but that is an argument, not a result, and the change touched 18 template files, which is a wide blast radius for an unexecuted edit. The new `shipsNoTemplateCommentaryToTheBrowser` assertion has never run. The two run-2 defects are in the same position: fixed, and unproven. | Re-run `./mvnw clean verify` with the Docker daemon running, then record the outcome here and under `docs/evidence/`. |
 | **One test emits a deprecation warning under Testcontainers 2.0.5.** | `ApplicationContextIT` "uses or overrides a deprecated API". Not fatal, but a clean build is this repository's standard. The warning was observed against the 5-test version of that class, so it needs re-checking at the current revision. | Re-run with `-Xlint:deprecation` to name the API, then replace it. |
+
+**Closed on 2026-10-02 — the Docker and compilation gaps, by real output:**
+
+- ~~Nothing has run since Milestone 3 was written; the review suite has never been compiled.~~
+  **Closed.** Both source sets compile at this revision, and `ReviewWorkflowIT` (17),
+  `SubmissionConcurrencyIT`, `StudentDashboardIT` (6) and `UiRenderingIT` (8) all executed in run 2.
+- ~~No Docker engine was reachable, so no integration test could run.~~ **Closed in run 2**, which
+  ran the whole integration suite against a containerised MySQL. Note what this cost: while the
+  daemon was down, run 1 reported 112 errors that said nothing about the code, and the two defects
+  that *did* exist stayed hidden behind them until run 2.
+- ~~The two defects run 2 found.~~ **Closed in run 3**, which reported neither: the upload test saw
+  the student's own title in the Title field, and the error-page test resolved a view instead of
+  failing on "No ModelAndView found". Both were closed by a run that reported them absent, not by
+  the argument that the fixes were right.
 
 **Closed on 2026-10-01 — resolved by real output, not by assumption:**
 
@@ -142,11 +213,16 @@ passing.** Two gaps remain.
   `.mvn/wrapper/maven-wrapper.properties` are committed and pin Maven 3.9.16 with
   `distributionType=only-script`, so `./mvnw` needs no local Maven install. See §2.
 
-Everything still open is either an unexecuted test suite or a compiler warning.
+Everything still open is either an unverified fix or a compiler warning. Nothing here is waiting on
+code that has not been written.
 
-> **On the two entries closed above by a re-run rather than by reasoning.** The Flyway defect was
+> **On the entries closed above by a re-run rather than by reasoning.** The Flyway defect was
 > a *fix* until a run proved it, and this document said so while it was one. Closing a gap here
 > requires output, not a plausible explanation — the standard the evidence rules are written to
-> (`docs/evidence/README.md` §3). Note also what this section still cannot claim: the green run it
-> cites was Milestone 2's. Nothing in the submission slice has been executed, which is why the
-> tool-version rows in §2–§6 remain marked *unverified* at this revision.
+> (`docs/evidence/README.md` §3). Run 3 is where that paid off: the two run-2 defects are closed
+> because a run reported them gone, not because their fixes looked right. The run-3 fix is in
+> exactly the position they were in before it ran, and stays listed as an open gap for the same
+> reason. Note also what this section still cannot claim: the submission and review slices **have**
+> now been executed — that is what runs 2 and 3 did — but they have not been executed *to green*.
+> The last green build it cites remains Milestone 2's, which is why the tool-version rows in §2–§6
+> are still marked *unverified* at this revision.

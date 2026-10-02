@@ -4,6 +4,7 @@ import com.vit.assignmentportal.auth.AuthenticatedUser;
 import com.vit.assignmentportal.auth.CurrentUserService;
 import com.vit.assignmentportal.auth.CurrentUserView;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -42,6 +43,15 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 @Controller
 @RequestMapping("/submissions")
 public class SubmissionController {
+
+    /**
+     * How many submissions one page of the student's list holds.
+     *
+     * <p>Ten: the list is a record of what the student has handed in, and a screenful is enough to
+     * find the piece they came for before paging. A presentation constant, so it lives here with the
+     * page it sizes rather than in configuration.
+     */
+    private static final int LIST_PAGE_SIZE = 10;
 
     private final SubmissionService submissionService;
     private final CurrentUserService currentUserService;
@@ -99,20 +109,31 @@ public class SubmissionController {
             // have to correct. The file is not: a browser cannot repopulate a file input, and
             // saying otherwise would be a lie the page then contradicts.
             redirectAttributes.addFlashAttribute("error", refusal.getMessage());
+            // The field the refusal is about, so the form can mark that input rather than only
+            // showing the sentence above the form. Null when the refusal names no single field, and
+            // the template treats that as "show the message, mark nothing".
+            redirectAttributes.addFlashAttribute("errorField", refusal.field());
             redirectAttributes.addFlashAttribute("title", title);
             redirectAttributes.addFlashAttribute("courseCode", courseCode);
             return "redirect:/submissions/new";
         }
     }
 
-    /** The signed-in student's own submissions. */
+    /**
+     * One page of the signed-in student's own submissions.
+     *
+     * <p>The page is read from the database rather than sliced in memory, so a student with years of
+     * coursework costs the same to render as one with three pieces. {@code page} is clamped at zero
+     * because a negative value can only arrive from a hand-edited address bar, and the choice there
+     * is between the first page and a 500 — a bound, not a business rule.
+     */
     @GetMapping
-    public String list(Model model) {
+    public String list(@RequestParam(name = "page", defaultValue = "0") int page, Model model) {
         AuthenticatedUser student = currentUserService.requireCurrentUser();
 
-        model.addAttribute("submissions", submissionService.listForStudent(student.id()).stream()
-                .map(SubmissionSummary::from)
-                .toList());
+        PageRequest request = PageRequest.of(Math.max(page, 0), LIST_PAGE_SIZE);
+        model.addAttribute("submissions",
+                submissionService.listForStudent(student.id(), request).map(SubmissionSummary::from));
 
         return "submission/list";
     }

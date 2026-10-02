@@ -13,6 +13,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -108,14 +110,17 @@ public class SubmissionService {
                              String courseCode) {
         Objects.requireNonNull(student, "student");
 
-        String acceptedTitle = requireText(title, "title", MAX_TITLE_LENGTH);
-        String acceptedCourseCode = requireText(courseCode, "course code", MAX_COURSE_CODE_LENGTH);
+        String acceptedTitle = requireText(title, "title", "title", MAX_TITLE_LENGTH);
+        String acceptedCourseCode =
+                requireText(courseCode, "course code", "courseCode", MAX_COURSE_CODE_LENGTH);
 
         // Validation first, and nothing above this line has touched the disk. Every rejection
         // below leaves the volume and the table exactly as they were.
         Optional<String> refusal = fileValidationService.validate(file);
         if (refusal.isPresent()) {
-            throw new InvalidSubmissionException(refusal.get());
+            // The field is `file` so the upload form can mark the file input, rather than showing
+            // the sentence detached from the control it is about.
+            throw new InvalidSubmissionException(refusal.get(), "file");
         }
         String originalFileName = fileValidationService.safeDisplayName(file.getOriginalFilename());
 
@@ -161,17 +166,39 @@ public class SubmissionService {
     }
 
     /**
-     * The signed-in student's own submissions, newest first.
+     * One page of the signed-in student's own submissions, newest first.
      *
      * <p>Takes an identifier rather than filtering a full list in memory. Passing
      * {@code findAll()} through a {@code filter} would load every student's rows into the
      * application and discard most of them — and would put the isolation rule in Java, where a
      * later change could quietly drop it.
+     *
+     * <p>The page is applied by the database rather than here, so the rows nobody will read are
+     * never fetched. The owner is part of the query, so the page is a bound on a set that was
+     * already scoped to this student and cannot widen it.
      */
     @Transactional(readOnly = true)
-    public List<Submission> listForStudent(UUID studentId) {
+    public Page<Submission> listForStudent(UUID studentId, Pageable pageable) {
         Objects.requireNonNull(studentId, "studentId");
-        return submissionRepository.findByStudentIdOrderByCreatedAtDesc(studentId);
+        Objects.requireNonNull(pageable, "pageable");
+        return submissionRepository.findByStudentIdOrderByCreatedAtDesc(studentId, pageable);
+    }
+
+    /**
+     * The three counts on the student's dashboard.
+     *
+     * <p>Three indexed {@code COUNT} queries rather than a scan of the student's submissions: the
+     * dashboard shows numbers and no rows, so fetching the rows to size them would be work the page
+     * throws away. Each count carries the owner in its {@code WHERE} clause, so none can report
+     * another student's work.
+     */
+    @Transactional(readOnly = true)
+    public SubmissionCounts countsForStudent(UUID studentId) {
+        Objects.requireNonNull(studentId, "studentId");
+        return new SubmissionCounts(
+                submissionRepository.countByStudentIdAndStatus(studentId, SubmissionStatus.SUBMITTED),
+                submissionRepository.countByStudentIdAndStatus(studentId, SubmissionStatus.APPROVED),
+                submissionRepository.countByStudentIdAndStatus(studentId, SubmissionStatus.REJECTED));
     }
 
     /**
@@ -233,16 +260,21 @@ public class SubmissionService {
     // ------------------------------------------------------------------------
 
     /**
-     * The reviewer's queue: everything still awaiting a decision, oldest first (FR-16).
+     * One page of the reviewer's queue: everything still awaiting a decision, oldest first (FR-16).
      *
      * <p>Oldest first, unlike the student's list. A queue is worked through, so the submission that
      * has been waiting longest is the one that should be seen first; a student's list answers "what
      * did I hand in recently?" and is therefore newest first. Served by the
      * {@code (status, created_at)} index.
+     *
+     * <p>The status is fixed here rather than passed in, so a caller cannot ask this method for
+     * decided work and page through it as though it were a queue.
      */
     @Transactional(readOnly = true)
-    public List<Submission> listAwaitingReview() {
-        return submissionRepository.findByStatusOrderByCreatedAtAsc(SubmissionStatus.SUBMITTED);
+    public Page<Submission> listAwaitingReview(Pageable pageable) {
+        Objects.requireNonNull(pageable, "pageable");
+        return submissionRepository
+                .findByStatusOrderByCreatedAtAsc(SubmissionStatus.SUBMITTED, pageable);
     }
 
     /**
@@ -424,15 +456,20 @@ public class SubmissionService {
      *
      * <p>Truncation would silently store something the student did not write. A refusal with a
      * message lets them fix it — and the column width is not a secret worth protecting.
+     *
+     * <p>Two names for the same field, and they are not redundant: {@code fieldName} is the words
+     * for the sentence the student reads ("course code"), and {@code field} is the form control's
+     * own name ("courseCode"), which the template uses to mark the offending input. They differ
+     * because a sentence and an input name are written for different readers.
      */
-    private String requireText(String value, String fieldName, int maxLength) {
+    private String requireText(String value, String fieldName, String field, int maxLength) {
         if (value == null || value.isBlank()) {
-            throw new InvalidSubmissionException("A " + fieldName + " is required.");
+            throw new InvalidSubmissionException("A " + fieldName + " is required.", field);
         }
         String trimmed = value.trim();
         if (trimmed.length() > maxLength) {
             throw new InvalidSubmissionException(
-                    "The " + fieldName + " may be at most " + maxLength + " characters.");
+                    "The " + fieldName + " may be at most " + maxLength + " characters.", field);
         }
         return trimmed;
     }

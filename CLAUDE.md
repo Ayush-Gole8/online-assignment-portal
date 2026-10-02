@@ -147,6 +147,12 @@ Other conventions:
   `submission_status_history`).
 - **Avoid Lombok.** Use records, explicit accessors, or plain fields. A Lombok dependency
   requires a concrete, documented reason and an ADR.
+- **A template ships no HTML comment that can reach the browser.** Thymeleaf renders
+  `<!-- … -->` verbatim, so a note written for the next developer is served to every reader too —
+  and the notes on the error page name `BasicErrorController` and `SecurityConfiguration`. Write
+  commentary as `<!--/* … */-->`, which the parser discards before rendering.
+  `UiRenderingIT.shipsNoTemplateCommentaryToTheBrowser` enforces this; §7 rule 11 is why the
+  disclosure matters.
 
 ## 6. Testing philosophy
 
@@ -281,11 +287,68 @@ container (docs/testing/strategy.md §3.2).
 ## 11. Current project status
 
 **Milestone 4 — the reviewer decision, the status history, and file download are implemented. No
-test suite later than Milestone 2's has been executed, so Milestones 3 and 4 are written but
-unproven.**
+suite later than Milestone 2's has yet run to green, so Milestones 3 and 4 are executed but
+unproven: the 2026-10-02 runs below are the first time any of this code has been exercised.**
 
-The last recorded `mvn clean verify` (2026-10-01T12:37) was **green**: 30 Failsafe tests and 5
-Surefire tests, zero failures. That run covered Milestone 2's code and predates every Milestone 3
+The build *has* moved since Milestone 2, and three `mvn clean verify` runs on **2026-10-02** — one
+without Docker, two with — between them report where the project actually stands. They also found
+three real defects, which is the strongest argument in this repository for running the suite rather
+than reasoning about it.
+
+**Run 1: no Docker daemon.** Both source sets compiled and the **unit** suite passed —
+**60 Surefire tests, 0 failures, 0 errors** — and then Failsafe discovered **112 integration tests
+across 10 classes and errored every one of them**. The single root cause, printed once on the first
+test of the first class:
+
+```
+Caused by: java.lang.IllegalStateException: Could not find a valid Docker environment.
+    at org.testcontainers.containers.GenericContainer.start(GenericContainer.java:316)
+    at com.vit.assignmentportal.MySqlIntegrationTest.<clinit>(MySqlIntegrationTest.java:59)
+```
+
+`MySqlIntegrationTest` starts its shared MySQL container in a static initialiser; with no engine
+reachable that initialiser throws, the class is poisoned for the JVM, and the other 111 errors are
+the resulting `NoClassDefFoundError: Could not initialize class …`. Nothing in Milestones 3 or 4 was
+reached — an environment failure, not a defect.
+
+**Run 2: Docker up, and the suite executed — 112 tests, 2 failures, 0 errors.** Both failures were
+real defects. Both fixes were then confirmed by run 3:
+
+- `SubmissionUploadIT.returnsTheEnteredMetadataToTheFormAfterARefusal` — a refused upload came back
+  with the Title input set to the page's own `<title>` text. `fragments/layout.html` declared
+  `th:fragment="page(title, body)"`, and a fragment parameter is a local variable over everything
+  `th:insert` splices in, so `${title}` in `upload.html` read the parameter instead of the flashed
+  model attribute. The parameters are now `pageTitle` / `pageContent`, which cannot collide.
+- `UiRenderingIT.rendersTheErrorPageWithoutExposingInternals` — "No ModelAndView found". A bare
+  `GET /error` sends no `Accept` header, so `BasicErrorController` answered from its JSON handler and
+  no view was resolved. The test now sets `Accept: text/html` and `ERROR_STATUS_CODE`, which is how a
+  container drives an error dispatch, so it asserts against a real status rather than the 999
+  sentinel. (Splitting it into a 500 case and a 404 case is why the count rises by one below.)
+
+**Run 3: 113 tests, 1 failure, 0 errors.** The two defects above are gone. The remaining failure was
+a third real defect, and the most instructive of the three because an assertion written to look for
+something else found it:
+
+- `rendersTheErrorPageWithoutExposingInternals` asserts the page does not contain the word
+  "exception". It did — because `error.html`'s own explanatory comment saying "a 404, a 500, or an
+  exception that reaches the container" was being **served to the browser**. Thymeleaf emits an
+  ordinary HTML comment verbatim: `<!-- … -->` is content, not whitespace. Every page was shipping
+  its engineering notes, and the error page's notes name `BasicErrorController`,
+  `SecurityConfiguration`, and the `server.error.include-message: never` setting. That is the
+  disclosure §7 rule 11 forbids, on the page an anonymous visitor is most likely to reach.
+
+  Fixed by writing every comment that can reach a browser as a Thymeleaf **parser-level** comment,
+  which the parser discards before rendering — 51 comments across 18 of the 19 template files.
+  `fragments/portal-header.html`, which nothing references, was left alone and should be deleted.
+  The assertion was **not** relaxed; it now passes because nothing reaches the browser. A new
+  `shipsNoTemplateCommentaryToTheBrowser` test enforces the rule on its own terms, so the next
+  comment is caught even when it does not happen to contain the word "exception".
+
+The criterion this leaves open is unchanged — a green `clean verify`. The three fixes are written
+and none has been executed.
+
+The last recorded *green* `mvn clean verify` (2026-10-01T12:37) was **green**: 30 Failsafe tests and
+5 Surefire tests, zero failures. That run covered Milestone 2's code and predates every Milestone 3
 and 4 file described below, so it is evidence for the two milestones behind us and for nothing in
 the two in front of us. The toolchain it used is recorded in
 [`docs/operations/toolchain.md`](docs/operations/toolchain.md), whose §9 records the same gap.
@@ -398,9 +461,10 @@ Rules for that response:
 
 ## 13. Next milestone readiness
 
-**Milestone 4 is code-complete and unproven.** Everything below is written; nothing below has been
-executed. A `[x]` here means *implemented*, never *verified* — the one criterion that would turn
-the first into the second is the last one, and it is open.
+**Milestone 4 is code-complete, executed, and unproven.** The 2026-10-02 runs compiled everything and
+ran the whole suite; the three defects they found are fixed and none of the fixes has been re-run. A
+`[x]` here means *implemented*, never *verified* — the one criterion that would turn the first into
+the second is the last one, and it is open.
 
 - [x] A `ReviewService` in `review/` recording one terminal decision — `APPROVED` or `REJECTED` —
       with a required comment (FR-18, FR-19), reachable only by a `REVIEWER` or an `ADMIN`.
@@ -428,19 +492,25 @@ the first into the second is the last one, and it is open.
 - [x] Tests written for the whole workflow: approve, reject, a missing reason, an invalid
       transition, a second decision, a concurrent conflict, history creation, reviewer
       authorisation, a student refused at every review route, and a student confined to their own
-      data. **Written, not run.**
+      data. **Executed** — the 2026-10-02 runs exercised all of them. Green is still unproven: run 3
+      ended on one failure, now fixed and not re-run.
 - [ ] **The audit trail, still outstanding from Milestone 2** (FR-24). ADR-005 requires sign-in
       attempts — **including failures** — to be recorded. No `audit_events` table and no
       `AuditService` exist, and the package that would own one is an open question recorded in
       [`application-structure.md` §5](docs/architecture/application-structure.md).
 - [ ] **`./mvnw clean verify` green, and the run recorded under
       [`docs/evidence/`](docs/evidence/).** This is the criterion that matters most and the only
-      one still open. `docs/evidence/` holds no captured output for any milestone, and
+      one still open. The 2026-10-02 runs narrowed it a long way: both source sets compile, the unit
+      suite is green, and the whole integration suite now runs against a containerised MySQL. Run 3
+      ended on a single failure — a template comment being served to the browser — which is fixed
+      and not re-run. `docs/evidence/` holds no captured output for any milestone, and
       [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md) records the same gap.
 
 Nothing decided so far may be merged with a hard-coded secret. The version numbers recorded in
 [`docs/operations/toolchain.md`](docs/operations/toolchain.md) must be updated with the
-versions actually used — which cannot happen until a build runs.
+versions actually used. Builds have now run — 2026-10-02 — but they recorded the versions of the
+tools they loaded, not the version of every tool listed in that document, so most of its rows are
+still marked *unverified* at this revision.
 
 **Milestone 5 — the delivery pipeline.** The application is now as complete as the MVP needs it to
 be; the deliverable this project actually exists to demonstrate is still absent. Milestone 5
