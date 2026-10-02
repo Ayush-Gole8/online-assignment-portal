@@ -8,16 +8,21 @@ health checking, and rollback.
 The application is deliberately modest. The engineering objective of this repository is the
 **delivery pipeline and the discipline around it**, not feature volume.
 
-> **Status: Milestone 3 — the student submission slice is implemented.** Session sign-in with the
-> three roles, PDF upload with server-side validation, SHA-256 checksums, file storage on a
-> volume, and a student's own submission list and detail page all exist. The last recorded
-> `mvn clean verify` (Milestone 2, 2026-10-01) was green; **the tests added by Milestone 3 have
-> not been run**, so treat this milestone's suite as written but unproven.
+> **Status: Milestone 4 — the reviewer workflow is implemented.** Session sign-in with the three
+> roles, PDF upload with server-side validation, SHA-256 checksums, file storage on a volume, and a
+> student's own submission list and detail page all exist. Milestone 4 added the reviewer side: a
+> queue of work awaiting a decision, a single terminal **approve/reject** decision with a mandatory
+> rejection reason, an **append-only status history** written in the same transaction as every
+> transition, **optimistic locking** so two reviewers cannot silently overwrite one another, and
+> **file download** for both the owner and the reviewer.
 >
-> **Nobody can review anything yet.** `review/` is empty, a submission can only ever be
-> `SUBMITTED`, there is no status history, and there is no audit trail. There is also no
-> `Dockerfile`, no `Jenkinsfile`, and no Ansible playbook — the delivery pipeline this repository
-> exists to demonstrate is still ahead.
+> **No suite has run to green since Milestone 2.** As of 2026-10-02 the build compiles all 40 main
+> sources and reaches test compilation; the tests added by Milestones 3 and 4 have never been
+> executed. Treat both milestones as written but unproven.
+>
+> **Not yet present — deliberately:** the audit trail (FR-24), any form of resubmission, an admin UI
+> beyond the role gate, and the delivery pipeline itself — no `Dockerfile`, no `Jenkinsfile`, no
+> Ansible playbook. The pipeline this repository exists to demonstrate is still ahead.
 >
 > See [Unverified claims](#unverified-claims) before relying on any statement below.
 >
@@ -35,11 +40,41 @@ STUDENT uploads a PDF  ──▶  SUBMITTED  ──▶  REVIEWER approves  ─�
                                             └▶ REVIEWER rejects  ──▶  REJECTED (final)
 ```
 
-- **STUDENT** — submits one PDF per assignment; sees the status and history of their own submissions.
-- **REVIEWER** — reviews submitted work and records an approve/reject decision with a comment.
-- **ADMIN** — manages users and roles, and can inspect the audit trail.
+- **STUDENT** — submits one PDF per assignment; sees the status, the reviewer's decision and reason,
+  and the chronological history of their own submissions, and can download their own file.
+- **REVIEWER** — works a queue of submissions awaiting a decision, reads the artefact, and records
+  one terminal approve/reject decision; a rejection requires a reason.
+- **ADMIN** — reaches the same reviewer screens as a `REVIEWER`. User management and the audit trail
+  are **not implemented**; `/admin/**` is gated but has no controller behind it.
 
-Rejected submissions are final. Resubmission is explicitly **out of scope** for the MVP.
+A decision is **final**: a decided submission cannot be decided again, and rejected work is never
+resubmitted. Resubmission is explicitly **out of scope** for the MVP.
+
+Every status change appends a row to `submission_status_history` in the same transaction as the
+change itself, so the history cannot disagree with the submission it describes. The student reading
+their own history sees what happened and when, but not who decided it.
+
+### Routes
+
+| Method & path | Who | What it does |
+| --- | --- | --- |
+| `GET /` | any signed-in user | Home page |
+| `GET /login`, `POST /login` | anonymous | Form sign-in |
+| `POST /logout` | signed-in | Sign out, invalidating the session server-side |
+| `GET /submissions` | `STUDENT` | The signed-in student's own submissions, newest first |
+| `GET /submissions/new`, `POST /submissions` | `STUDENT` | Upload one PDF |
+| `GET /submissions/{id}` | `STUDENT` | One own submission: status, decision, reason, history |
+| `GET /submissions/{id}/file` | `STUDENT` | Download one's own file, as an attachment |
+| `GET /review` | `REVIEWER`, `ADMIN` | Queue of submissions awaiting a decision, oldest first |
+| `GET /review/submissions/{id}` | `REVIEWER`, `ADMIN` | One submission, with its history and the decision form |
+| `POST /review/submissions/{id}` | `REVIEWER`, `ADMIN` | Record one terminal decision |
+| `GET /review/submissions/{id}/file` | `REVIEWER`, `ADMIN` | Download the artefact |
+| `GET /actuator/health` | anonymous | Liveness — status only, no details |
+
+Authorisation is a route rule in the security filter chain, not a check inside a handler. A student
+reaching another student's submission gets **404**, not **403** — "not yours" and "not there" are
+deliberately the same answer, so the endpoint cannot be used to discover which identifiers exist.
+Uploaded files are always served as attachments with a fixed content type, never rendered inline.
 
 ## Technology stack
 
@@ -109,13 +144,14 @@ required stages are fixed by [`docs/requirements/mvp.md`](docs/requirements/mvp.
 │   ├── main/java/com/vit/assignmentportal/
 │   │   ├── AssignmentPortalApplication.java
 │   │   ├── auth/                 # identity: sign-in, roles, the User entity
-│   │   ├── submission/           # the student's slice: upload, list, detail
-│   │   ├── storage/              # file bytes on a volume: validate, store, checksum
+│   │   ├── submission/           # the student's slice, the status transition, the history
+│   │   ├── review/               # the reviewer's slice: queue, decision policy, reviewer pages
+│   │   ├── storage/              # file bytes on a volume: validate, store, load, checksum
 │   │   ├── config/               # the security filter chain and route rules
 │   │   └── common/               # shared kernel — value types and enums only
 │   ├── main/resources/
 │   │   ├── application.yml       # Externalised configuration — no secrets
-│   │   ├── db/migration/         # Flyway migrations: V1 users, V2 submissions
+│   │   ├── db/migration/         # Flyway: V1 users, V2 submissions, V3 status history
 │   │   ├── templates/            # Thymeleaf views, one directory per feature
 │   │   └── static/               # CSS and assets
 │   └── test/java/com/vit/assignmentportal/
@@ -123,7 +159,9 @@ required stages are fixed by [`docs/requirements/mvp.md`](docs/requirements/mvp.
 │       ├── ApplicationContextIT.java      # migrations and every schema constraint
 │       ├── auth/                 # encoder unit test + authentication/authorization ITs
 │       ├── storage/              # unit tests: validation, checksums, paths, I/O
-│       └── submission/           # upload, access-isolation, failure-handling ITs
+│       ├── submission/           # upload, access-isolation, failure-handling,
+│       │                         #   and the two-reviewer concurrency IT
+│       └── review/               # reviewer workflow IT + decision-handler unit test
 ├── docs/
 │   ├── requirements/             # What must be built (and what must not)
 │   ├── architecture/             # Structure, diagrams, data model
@@ -207,25 +245,39 @@ than an in-memory substitute, so the migration is exercised on the engine that s
 
 ## Next milestone readiness
 
-**Milestone 4 — the reviewer decision.** A student can submit work and see their own; nobody can
-review it. The next milestone adds the reviewer queue, the single terminal approve/reject decision
-with its required comment, the append-only status history, and the audit trail still outstanding
-from Milestone 2.
+**Milestone 5 — the delivery pipeline.** The application now covers the MVP's functional scope: a
+student can submit and read a decision, and a reviewer can decide. The deliverable this repository
+actually exists to demonstrate is still absent — no `Dockerfile`, no `Jenkinsfile`, no Ansible
+playbooks, no Selenium suite, and no registry publication or rollback path.
+
+The audit trail (FR-24), still outstanding from Milestone 2, is the one functional criterion not yet
+met and should either ride along with Milestone 5 or be explicitly deferred in an ADR.
+
+Nothing in Milestone 5 should be started before the current build is green, because a pipeline that
+has never seen a passing build has nothing to demonstrate.
 
 Entry criteria: [`CLAUDE.md` §13](CLAUDE.md#13-next-milestone-readiness).
 
 ## Unverified claims
 
-**The last recorded build is Milestone 2's**, and it was green — 30 Failsafe tests and 5 Surefire
-tests, zero failures. That run predates every file the submission slice added, so it is evidence
-for the milestones behind us and for nothing in the current one. As of 2026-10-01:
+**The last recorded green build is Milestone 2's** — 30 Failsafe tests and 5 Surefire tests, zero
+failures. That run predates every file Milestones 3 and 4 added, so it is evidence for the milestones
+behind us and for nothing in the two in front of us.
+
+Since then the build has been run and has moved forward: on **2026-10-02** it compiled **all 40 main
+sources** and reached **test compilation**, where it stopped on a single error. That error has been
+fixed but the build has **not been re-run**, and **no test has executed**. As of 2026-10-02:
 
 | Claim | Status |
 | --- | --- |
 | `./mvnw clean verify` passes **at this revision** | **Not run** — the last green run was Milestone 2 |
+| All 40 main sources compile | **Observed** on 2026-10-02, at the revision current then |
+| All test sources compile | **Not confirmed** — the run stopped at one test error, since fixed |
 | The storage and submission unit tests pass | **Not run** |
 | The upload, access-isolation, and failure-handling ITs pass | **Not run** |
-| `ApplicationContextIT` passes with the `submissions` constraints | **Not run** — the recorded run executed the 5-test Milestone 2 version |
+| `ApplicationContextIT` passes with the `submissions` and `submission_status_history` constraints | **Not run** — the recorded run executed the 5-test Milestone 2 version |
+| The reviewer workflow IT and the decision-handler unit test pass | **Not run** — written, never compiled |
+| The two-reviewer concurrency IT refuses the loser | **Not run** — written, never compiled |
 | Spring Boot 4.1.1 and the starter coordinates resolve | **Verified** — the parent resolves, the JAR is repackaged, the context boots |
 | `V1__baseline.sql` applies and `users` accepts the documented roles | **Verified** by the recorded `ApplicationContextIT` |
 | Authentication and route rules behave as documented | **Verified** by the recorded `AuthenticationIT` (11) and `AuthorizationIT` (14) |
