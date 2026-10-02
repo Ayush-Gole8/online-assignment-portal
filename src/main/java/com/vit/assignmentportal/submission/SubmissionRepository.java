@@ -1,9 +1,10 @@
 package com.vit.assignmentportal.submission;
 
 import com.vit.assignmentportal.common.SubmissionStatus;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
@@ -23,13 +24,18 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface SubmissionRepository extends JpaRepository<Submission, UUID> {
 
     /**
-     * Every submission belonging to one student, newest first.
+     * One page of a student's submissions, newest first.
      *
      * <p>Ordered by {@code created_at} descending because the student's list answers "what have I
      * handed in recently?", and the index on {@code (student_id, created_at)} serves both the
      * filter and the sort without a filesort.
+     *
+     * <p>The owner is a parameter of the query and the page is a bound on it, so paging cannot widen
+     * the result — page 2 of a student's own work is still only that student's work. The
+     * {@code OrderBy} in the method name supplies the sort, so a caller passes an unsorted
+     * {@link Pageable} and cannot accidentally re-order away from the indexed one.
      */
-    List<Submission> findByStudentIdOrderByCreatedAtDesc(UUID studentId);
+    Page<Submission> findByStudentIdOrderByCreatedAtDesc(UUID studentId, Pageable pageable);
 
     /**
      * One submission, but only if it belongs to the given student.
@@ -45,7 +51,7 @@ public interface SubmissionRepository extends JpaRepository<Submission, UUID> {
     Optional<Submission> findByIdAndStudentId(UUID id, UUID studentId);
 
     /**
-     * Every submission in one status, oldest first — the reviewer's queue (FR-16).
+     * One page of one status, oldest first — the reviewer's queue (FR-16).
      *
      * <p>Ascending by {@code created_at}, unlike the student's list: a queue is worked through, so
      * the submission that has waited longest comes first. The index on {@code (status, created_at)}
@@ -53,7 +59,19 @@ public interface SubmissionRepository extends JpaRepository<Submission, UUID> {
      *
      * <p>Not scoped by any user, and that is deliberate — a reviewer is authorised by role at the
      * route, not by ownership. This is the one query in this interface that does not carry an
-     * owner, and the comment on the type explains why the others all do.
+     * owner, and the comment on the type explains why the others all do. The status is fixed by the
+     * caller ({@code SUBMITTED}), so paging cannot surface a decided submission as if it were
+     * waiting.
      */
-    List<Submission> findByStatusOrderByCreatedAtAsc(SubmissionStatus status);
+    Page<Submission> findByStatusOrderByCreatedAtAsc(SubmissionStatus status, Pageable pageable);
+
+    /**
+     * How many of one student's submissions are in one status.
+     *
+     * <p>A {@code COUNT} rather than loading the rows and sizing the list: the dashboard shows three
+     * numbers and nothing else, so reading the rows to count them would fetch data the page never
+     * renders. The count is still scoped by owner in the {@code WHERE} clause, so it cannot report
+     * another student's work.
+     */
+    long countByStudentIdAndStatus(UUID studentId, SubmissionStatus status);
 }

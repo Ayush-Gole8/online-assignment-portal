@@ -108,6 +108,8 @@ com.vit.assignmentportal
 │   ├── SubmissionRepository.java           #   every student query carries the owner             [EXISTS]
 │   ├── SubmissionService.java              #   the two-phase write; the status transition        [EXISTS]
 │   ├── SubmissionController.java           #   /submissions, /new, POST, /{id}, /{id}/file       [EXISTS]
+│   ├── StudentDashboardController.java     #   /student/dashboard — counts and the recent few     [EXISTS]
+│   ├── SubmissionCounts.java               #   record: one count per status, plus a derived total [EXISTS]
 │   ├── SubmissionSummary.java              #   record, read model for the list                   [EXISTS]
 │   ├── SubmissionDetail.java               #   record, read model for the detail page            [EXISTS]
 │   ├── SubmissionTimestampFormat.java      #   package-private; UTC formatting for templates      [EXISTS]
@@ -122,6 +124,7 @@ com.vit.assignmentportal
 │   └── templates/
 │       ├── upload.html                                                                          [EXISTS]
 │       ├── list.html                                                                            [EXISTS]
+│       ├── dashboard.html                  #   counts, recent work, empty state                  [EXISTS]
 │       └── detail.html                     #   status, decision, reason, history, download        [EXISTS]
 │
 ├── review/                                 # feature: the reviewer decision
@@ -173,19 +176,32 @@ src/main/resources
 │   ├── V2__submissions.sql                 # `submissions`                                         [EXISTS]
 │   └── V3__submission_status_history.sql   # `submission_status_history`                           [EXISTS]
 ├── templates/
+│   ├── error.html                          # the view every unhandled failure renders as           [EXISTS]
 │   ├── auth/                               # views the auth feature owns                           [EXISTS]
 │   ├── submission/                         # views the submission feature owns                     [EXISTS]
 │   ├── review/                             # views the review feature owns — queue, detail         [EXISTS]
-│   └── fragments/portal-header.html        # the shared page header, replaced into each page       [EXISTS]
-└── static/css/portal.css                   # the server-rendered UI's only stylesheet               [EXISTS]
+│   └── fragments/                          # the shared markup, written once                       [EXISTS]
+│       ├── layout.html                     #   the signed-in document skeleton
+│       ├── layout-auth.html                #   the skeleton for pages reached without a session
+│       ├── navbar.html                     #   role-aware links and the sign-out form
+│       ├── flash.html                      #   one alert, rendered from a message and a type
+│       ├── validation.html                 #   a field-level refusal, rendered from an error
+│       ├── status.html                     #   the status badge
+│       ├── pagination.html                 #   previous / next, hidden when there is one page
+│       └── footer.html                     #   the footer, shared by both skeletons
+└── static/css/
+    ├── bootstrap.min.css                   # vendored Bootstrap 5.3.3 — NOT YET IN THE TREE         [MISSING]
+    └── portal.css                          # this application's own rules, layered on Bootstrap     [EXISTS]
 
 src/test/java/com/vit/assignmentportal
 ├── MySqlIntegrationTest.java               # the shared Testcontainer base class                   [EXISTS]
 ├── ApplicationContextIT.java               # context, migrations, and every CHECK constraint       [EXISTS]
+├── UiRenderingIT.java                      # the guarantees every page shares: no script, the
+│                                           #   vendored stylesheets, the role-aware navbar         [EXISTS]
 ├── auth/                                   # PasswordEncoderTest, AuthenticationIT, AuthorizationIT [EXISTS]
 ├── storage/                                # unit tests for the four storage classes               [EXISTS]
 ├── submission/                             # upload, access-isolation, failure-handling, download,
-│                                           #   and the two-reviewer concurrency IT                 [EXISTS]
+│                                           #   the two-reviewer concurrency IT, and the dashboard IT [EXISTS]
 └── review/                                 # ReviewWorkflowIT (MockMvc) and ReviewControllerTest     [EXISTS]
 ```
 
@@ -267,6 +283,8 @@ introduced purely for testability add indirection without buying anything.
 | "Turn a path into a file name that cannot escape the volume" | `storage/StorageIdentifier` | Making the invariant a type beats checking it at every call site |
 | "Format a timestamp for display" | `submission/SubmissionTimestampFormat` | A view concern of *this* feature. **Not** a `DateUtils`, and not in `config` — nothing else needs it yet |
 | "Render the reviewer queue" | `review/ReviewController` + `review/templates/` | Feature owns its own slice |
+| "Summarise a student's work by status" | `submission/StudentDashboardController` + `submission/SubmissionCounts` | A view of the submission feature's own data; the counts are read models, not entities |
+| "Draw the navigation and the sign-out form" | `templates/fragments/navbar.html` | One copy of a POST form that must carry a CSRF token everywhere |
 | "Decide whether a note is required for this outcome" | `review/ReviewService` | Decision *policy*, and only the reviewer feature has it |
 | "Move a submission from `SUBMITTED` to `APPROVED`" | `submission/SubmissionService` | The transition *mechanism*, and only the owner of the entity may perform it |
 | "Append a row to the status history" | `submission/SubmissionService` | Same transaction as the status change, so the same class orders both |

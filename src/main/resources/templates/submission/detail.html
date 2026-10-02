@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--
+<!--/*
   One submission, as its owner sees it.
 
   `submission` is a SubmissionDetail — a read model. It deliberately does NOT include the
@@ -13,119 +13,143 @@
   was stored is the artefact they uploaded.
 
   `history` is a list of SubmissionHistoryEntry, oldest first. It carries no actor: the
-  student is told what happened, not who decided it.
+  student is told what happened, not who decided it (FR-22 is an administrator's concern).
+
+  THE DECISION SECTION IS ALWAYS PRESENT and always says something. Before a review it
+  says so in a sentence; after one it names the outcome and, for a rejection, the reason.
+  A student should never have to work out whether an absent section means "not yet" or
+  "the page is broken".
 
   Model attributes:
-    currentUser  CurrentUserView          — for the header fragment
+    currentUser  CurrentUserView          — for the navigation fragment
     submission   SubmissionDetail
     history      List<SubmissionHistoryEntry>
     submitted    String                   — a flash attribute, present only after an upload
--->
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title th:text="${submission.title} + ' — Online Assignment Portal'">Submission</title>
-    <link rel="stylesheet" th:href="@{/css/portal.css}">
 </head>
 <body>
 
-<header th:replace="~{fragments/portal-header :: header}"></header>
+<section>
 
-<main class="card card-wide">
+    <!--/* A flash attribute, so it appears once after the redirect from the upload and is
+         gone on a refresh. Reloading this page does not re-upload anything. */-->
+    <div th:replace="~{fragments/flash :: alert('success',
+            ${submitted} + ' was submitted for review.')}"></div>
 
-    <!-- A flash attribute, so it appears once after the redirect from the upload and is
-         gone on a refresh. Reloading this page does not re-upload anything. -->
-    <p class="notice notice-success" th:if="${submitted}" role="status">
-        <span th:text="${submitted}">essay.pdf</span> was submitted for review.
-    </p>
-
-    <h1 th:text="${submission.title}">Coursework</h1>
-    <p class="subtitle" th:text="${submission.courseCode}">CS101</p>
-
-    <p>
-        <span class="status"
-              th:classappend="${'status-' + #strings.toLowerCase(submission.status.name())}"
-              th:text="${submission.status}">SUBMITTED</span>
-    </p>
-
-    <h2>The file</h2>
-    <dl class="facts">
-        <dt>Original name</dt>
-        <dd th:text="${submission.originalFileName}">essay.pdf</dd>
-
-        <dt>Type</dt>
-        <dd th:text="${submission.contentType}">application/pdf</dd>
-
-        <dt>Size</dt>
-        <dd th:text="${submission.readableSize()}">1.5 MB</dd>
-
-        <!-- The digest of the bytes as they were stored. Lowercase hex, computed from the
-             same array that was written to the volume. -->
-        <dt>SHA-256</dt>
-        <dd><code class="checksum" th:text="${submission.checksumSha256}">9f86d081…</code></dd>
-    </dl>
-
-    <!-- Served as an attachment with a fixed content type, never inline: see
-         SubmissionFileAttachment. The owner is resolved server-side from the session, so
-         this link works only for the student it belongs to. -->
-    <p>
-        <a class="button-link"
-           th:href="@{/submissions/{id}/file(id=${submission.id})}"
-           th:text="${'Download ' + submission.originalFileName}">Download essay.pdf</a>
-    </p>
-
-    <h2>Decision</h2>
-
-    <!-- Renders only once a reviewer has decided. Before that the student sees a single
-         sentence rather than an empty box, so "no decision yet" reads as a state and not
-         as a missing section. -->
-    <p th:if="${submission.status.name() == 'SUBMITTED'}" class="muted">
-        Not yet reviewed.
-    </p>
-
-    <dl class="facts" th:if="${submission.status.name() != 'SUBMITTED'}">
-        <dt>Reviewed</dt>
-        <dd th:text="${submission.reviewedOn()}">2 Oct 2026, 11:00 UTC</dd>
-    </dl>
-
-    <!-- Present only for a rejection. The heading names the outcome, so a student who
-         skims the page cannot mistake a reason for praise. -->
-    <div th:if="${submission.rejectionReason != null}">
-        <h3 class="section-heading">Reason for rejection</h3>
-        <p class="notice notice-error" th:text="${submission.rejectionReason}">
-            The submitted file was not a readable PDF.
-        </p>
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+        <div>
+            <h1 class="h3 mb-1" th:text="${submission.title}">Coursework</h1>
+            <p class="text-body-secondary" th:text="${submission.courseCode}">CS101</p>
+        </div>
+        <span th:replace="~{fragments/status :: badge(${submission.status})}">SUBMITTED</span>
     </div>
 
-    <h2>History</h2>
+    <div class="row g-4">
+        <div class="col-12 col-lg-7">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">The file</h2>
+                    <dl class="row mb-3">
+                        <dt class="col-sm-4 text-body-secondary fw-normal">Original name</dt>
+                        <dd class="col-sm-8" th:text="${submission.originalFileName}">essay.pdf</dd>
 
-    <!-- The chronological record, oldest first. Each state transition is one row, written
-         in the same transaction as the change it describes, so this list and the status
-         above cannot disagree. `isCreation()` is derived from the absence of a previous
-         status, so the first entry is labelled without this template having to count. -->
-    <ol class="timeline">
-        <li th:each="entry : ${history}">
-            <p class="timeline-when" th:text="${entry.occurredOn()}">1 Oct 2026, 09:15 UTC</p>
-            <p class="timeline-what">
-                <span th:if="${entry.isCreation()}">Submitted for review</span>
-                <span th:unless="${entry.isCreation()}"
-                      th:text="${'Decision: ' + entry.toStatus}">Decision: APPROVED</span>
-            </p>
-        </li>
-    </ol>
+                        <dt class="col-sm-4 text-body-secondary fw-normal">Type</dt>
+                        <dd class="col-sm-8" th:text="${submission.contentType}">application/pdf</dd>
 
-    <h3 class="section-heading">Timestamps</h3>
-    <dl class="facts">
-        <dt>Submitted</dt>
-        <dd th:text="${submission.submittedOn()}">1 Oct 2026, 09:15 UTC</dd>
+                        <dt class="col-sm-4 text-body-secondary fw-normal">Size</dt>
+                        <dd class="col-sm-8" th:text="${submission.readableSize()}">1.5 MB</dd>
 
-        <dt>Last changed</dt>
-        <dd th:text="${submission.lastChangedOn()}">1 Oct 2026, 09:15 UTC</dd>
-    </dl>
+                        <!--/* The digest of the bytes as they were stored. Lowercase hex, computed
+                             from the same array that was written to the volume. */-->
+                        <dt class="col-sm-4 text-body-secondary fw-normal">SHA-256</dt>
+                        <dd class="col-sm-8"><code class="checksum" th:text="${submission.checksumSha256}">9f86d081…</code></dd>
+                    </dl>
 
-    <p><a class="button-link" th:href="@{/submissions}">Back to my submissions</a></p>
-</main>
+                    <!--/* Served as an attachment with a fixed content type, never inline: see
+                         SubmissionFileAttachment. The owner is resolved server-side from the
+                         session, so this link works only for the student it belongs to. */-->
+                    <a class="btn btn-outline-secondary"
+                       th:href="@{/submissions/{id}/file(id=${submission.id})}"
+                       th:text="${'Download ' + submission.originalFileName}">Download essay.pdf</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">Decision</h2>
+
+                    <!--/* Renders only once a reviewer has decided. Before that the student sees a
+                         single sentence rather than an empty box, so "no decision yet" reads as a
+                         state and not as a missing section. */-->
+                    <p class="text-body-secondary mb-0"
+                       th:if="${submission.status.name() == 'SUBMITTED'}">
+                        Not yet reviewed.
+                    </p>
+
+                    <div th:if="${submission.status.name() != 'SUBMITTED'}">
+                        <dl class="row mb-0">
+                            <dt class="col-sm-4 text-body-secondary fw-normal">Reviewed</dt>
+                            <dd class="col-sm-8" th:text="${submission.reviewedOn()}">2 Oct 2026, 11:00 UTC</dd>
+                        </dl>
+
+                        <!--/* Present only for a rejection. The heading names the outcome, so a
+                             student who skims the page cannot mistake a reason for praise. */-->
+                        <div class="mt-3" th:if="${submission.rejectionReason != null}">
+                            <h3 class="h6 text-danger">Reason for rejection</h3>
+                            <p class="alert alert-danger mb-0" th:text="${submission.rejectionReason}">
+                                The submitted file was not a readable PDF.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <h2 class="h5">History</h2>
+
+            <!--/* The chronological record, oldest first. Each state transition is one row,
+                 written in the same transaction as the change it describes, so this list and
+                 the status above cannot disagree. `isCreation()` is derived from the absence
+                 of a previous status, so the first entry is labelled without this template
+                 having to count. */-->
+            <ol class="timeline mb-0">
+                <li th:each="entry : ${history}">
+                    <p class="timeline-when mb-0 text-body-secondary small"
+                       th:text="${entry.occurredOn()}">1 Oct 2026, 09:15 UTC</p>
+                    <p class="timeline-what mb-0 fw-semibold">
+                        <span th:if="${entry.isCreation()}">Submitted for review</span>
+                        <span th:unless="${entry.isCreation()}"
+                              th:text="${'Decision: ' + entry.toStatus}">Decision: APPROVED</span>
+                    </p>
+                </li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <h2 class="h5">Timestamps</h2>
+            <dl class="row mb-0">
+                <dt class="col-sm-3 text-body-secondary fw-normal">Submitted</dt>
+                <dd class="col-sm-9" th:text="${submission.submittedOn()}">1 Oct 2026, 09:15 UTC</dd>
+
+                <dt class="col-sm-3 text-body-secondary fw-normal">Last changed</dt>
+                <dd class="col-sm-9" th:text="${submission.lastChangedOn()}">1 Oct 2026, 09:15 UTC</dd>
+            </dl>
+        </div>
+    </div>
+
+    <p class="mt-4"><a th:href="@{/submissions}">Back to my submissions</a></p>
+</section>
 
 </body>
 </html>

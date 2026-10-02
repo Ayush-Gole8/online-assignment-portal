@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<!--/*
+  The document skeleton every signed-in page is built on.
+
+  Thymeleaf has no built-in layout inheritance, and the alternative that supplies one —
+  the Layout Dialect — is a dependency this project does not need for three shared
+  elements. Fragment parameters do the same job with nothing added: the layout declares
+  `page(pageTitle, pageContent)`, and a page calls it with two fragment expressions, one
+  for the <title> it wants and one for the body it wrote.
+
+  WHY THE PARAMETERS ARE NAMED pageTitle AND pageContent, NOT title AND body.
+
+  A fragment parameter becomes a LOCAL VARIABLE over the whole fragment body — including
+  over the caller's fragment where `th:insert` splices it in below. A page that also had a
+  model attribute of the same name would silently read the parameter instead, and the
+  symptom is a template that renders a plausible-looking wrong value rather than an error.
+
+  That is not hypothetical. This layout was first written as `page(title, body)`, and
+  upload.html renders `th:value="${title}"` to hand a refused upload back to the student.
+  Inside this fragment `${title}` resolved to the fragment parameter — a Fragment object
+  whose text is the caller's own <title> element — so the Title field came back as
+  "<title>Upload a submission — Online Assignment Portal</title>". SubmissionUploadIT
+  caught it; nothing else would have, because the page still rendered and still passed
+  every assertion that did not look at that input's value.
+
+  The `page` prefix is what fixes it: it cannot collide with a model attribute the way an
+  ordinary domain noun like `title` can. Callers are unaffected — they pass fragment
+  expressions, not named arguments.
+
+  Used as:
+
+      <html th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
+        <head><title>My submissions — Online Assignment Portal</title></head>
+        <body><section> ...the page... </section></body>
+      </html>
+
+  Two deliberate choices in that call shape:
+
+  * The body is a `<section>` rather than a `<main>`. The layout supplies the <main>
+    element itself and *inserts* the caller's fragment inside it, so a page cannot end
+    up with two mains — which is what would happen if the layout replaced its own
+    <main> with the caller's.
+
+  * The <title> is replaced rather than inserted, because <head> must hold exactly one.
+
+  What this file deliberately does NOT do:
+
+  * No JavaScript. There is no Bootstrap bundle, no inline script, and no inline event
+    handler anywhere in this application. NFR-2 requires every flow to complete with
+    JavaScript disabled, and a page that half-works without it is worse than one that
+    never needed it.
+
+  * No collapsing navbar. Bootstrap's collapse behaviour is JavaScript, so the navbar
+    wraps instead of collapsing. See fragments/navbar.html.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en" th:fragment="page(pageTitle, pageContent)">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:replace="${pageTitle}">Online Assignment Portal</title>
+
+    <!--/* Bootstrap first, this application's own rules second, so the overrides in
+         portal.css win at equal specificity. Both are local files: the application
+         fetches nothing from a third-party origin at runtime, which keeps it working
+         on an air-gapped CI agent and keeps the Selenium stage deterministic. */-->
+    <link rel="stylesheet" th:href="@{/css/bootstrap.min.css}">
+    <link rel="stylesheet" th:href="@{/css/portal.css}">
+</head>
+<body class="d-flex flex-column min-vh-100 bg-body-tertiary">
+
+<!--/* The first focusable element on the page. A keyboard user should be able to jump
+     past the navigation rather than tab through it on every page. */-->
+<a class="visually-hidden-focusable" href="#main-content">Skip to main content</a>
+
+<nav th:replace="~{fragments/navbar :: navbar}"></nav>
+
+<main id="main-content" class="container flex-grow-1 py-4" th:insert="${pageContent}"></main>
+
+<footer th:replace="~{fragments/footer :: footer}"></footer>
+
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!--/*
+  Flash and validation messages, rendered in one place.
+
+  Every message this application shows a user is a complete sentence composed by the
+  server — a refusal from a validator, a confirmation of a stored decision, or the
+  outcome of a sign-out. They arrive as flash attributes, survive exactly one redirect,
+  and are gone on a refresh, which is why reloading a page never repeats an upload or a
+  decision.
+
+  Used as:
+
+      <div th:replace="~{fragments/flash :: alert('danger', ${error})}"></div>
+      <div th:replace="~{fragments/flash :: alert('success', ${submitted} + ' was submitted for review.')}"></div>
+
+  The fragment renders NOTHING when the message is null or blank, so a caller can pass a
+  conditionally-computed message and let the fragment decide. That is what keeps a page
+  from having to wrap each alert in its own th:if.
+
+  The ARIA role differs by outcome on purpose:
+
+  * `role="alert"` for a refusal. It is assertive: a screen reader interrupts to read it,
+    which is right for "your upload was refused".
+  * `role="status"` for a confirmation. It is polite: the message waits its turn, which
+    is right for "this was saved" — it is information, not an interruption.
+
+  The message is always inserted with th:text, so anything it contains is escaped. No
+  message in this application interpolates text a user supplied (CLAUDE.md §7 rule 11),
+  but the template does not rely on that being true.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fragment</title>
+</head>
+<body>
+
+<div th:fragment="alert(type, message)"
+     th:if="${message != null and !#strings.isEmpty(message)}"
+     class="alert"
+     th:classappend="${type == 'success' ? 'alert-success' : 'alert-danger'}"
+     th:attr="role=${type == 'success' ? 'status' : 'alert'}"
+     th:text="${message}">Message</div>
+
+</body>
+</html>

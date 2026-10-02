@@ -8,6 +8,7 @@ import com.vit.assignmentportal.submission.SubmissionAlreadyDecidedException;
 import com.vit.assignmentportal.submission.SubmissionFileAttachment;
 import java.util.UUID;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -55,6 +56,16 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 @RequestMapping("/review")
 public class ReviewController {
 
+    /**
+     * How many submissions one page of the queue holds.
+     *
+     * <p>Twenty, chosen for the page rather than for the query: a queue is worked through, and a
+     * page that fits on a screen without the pager being scrolled past is a page a reviewer can
+     * finish. It is a presentation constant, so it lives with the controller that renders the page
+     * rather than in configuration.
+     */
+    private static final int QUEUE_PAGE_SIZE = 20;
+
     private final ReviewService reviewService;
     private final CurrentUserService currentUserService;
 
@@ -69,10 +80,23 @@ public class ReviewController {
         return CurrentUserView.from(currentUserService.requireCurrentUser());
     }
 
-    /** The queue of submissions awaiting a decision (FR-16). */
-    @GetMapping
-    public String queue(Model model) {
-        model.addAttribute("submissions", reviewService.queue());
+    /**
+     * The queue of submissions awaiting a decision (FR-16).
+     *
+     * <p>Mapped at both {@code /review} and {@code /review/queue}. The bare path is the original and
+     * is the one the home page and the navigation have always linked to, so it stays; {@code
+     * /review/queue} names the page the way the rest of the site names its pages, and is what the
+     * navigation bar now points at. Two paths, one handler — a redirect from one to the other would
+     * only add a round trip.
+     *
+     * <p>{@code page} is clamped at zero rather than validated upward. A negative value is not
+     * something a link produces; it arrives from a hand-edited address bar, and the choice is
+     * between the first page and a 500. This is a bound, not a business rule.
+     */
+    @GetMapping({"", "/queue"})
+    public String queue(@RequestParam(name = "page", defaultValue = "0") int page, Model model) {
+        PageRequest request = PageRequest.of(Math.max(page, 0), QUEUE_PAGE_SIZE);
+        model.addAttribute("submissions", reviewService.queue(request));
         return "review/queue";
     }
 

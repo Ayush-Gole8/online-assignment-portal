@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--/*
+  The pager, shared by the student's submission list and the reviewer's queue.
+
+  Used as:
+
+      <nav th:replace="~{fragments/pagination :: paginate(${submissions}, '/submissions')}"></nav>
+
+  It renders NOTHING when there is one page or fewer. A control that can only ever lead
+  back to the page the user is on is noise, and on the common case — a student with three
+  submissions, a queue with two items — it would be the most prominent thing on the page.
+
+  The href is built with Thymeleaf's preprocessing (`__${baseUrl}__`) because the base path
+  differs per page and the query parameter does not. Without it the fragment would need an
+  if/else per caller, which is the duplication this fragment exists to remove. `@{...}`
+  prepends the context path and percent-encodes, so a caller passes `/submissions` rather
+  than a full URL.
+
+  WHY THERE IS NO PAGE-NUMBER LIST.
+
+  The MVP's lists are short — a student's own coursework, and a queue that is worked
+  through rather than browsed. A windowed run of page numbers is a control whose edge cases
+  (first, last, gaps, a single page in the middle) are most of its code and none of its
+  value here. Previous and Next, plus an honest "page N of M", says everything a reader
+  needs. If a list ever grows past a handful of pages, this is the fragment to extend.
+
+  The current page is rendered as text, not a link, and the end controls are `disabled`
+  rather than absent: a pager whose buttons move around between pages is harder to use with
+  a keyboard than one whose buttons stay put and go inert.
+
+  `aria-label` distinguishes these controls from the site navigation for a screen reader,
+  and `page.first` / `page.last` come from Spring Data's Page, which knows both.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fragment</title>
+</head>
+<body>
+
+<nav th:fragment="paginate(page, baseUrl)"
+     th:if="${page.totalPages > 1}"
+     aria-label="Pagination of results">
+
+    <ul class="pagination mb-0">
+        <li class="page-item" th:classappend="${page.first ? 'disabled' : ''}">
+            <a class="page-link"
+               th:href="@{__${baseUrl}__(page=${page.number - 1})}">Previous</a>
+        </li>
+
+        <li class="page-item disabled">
+            <span class="page-link"
+                  th:text="${'Page ' + (page.number + 1) + ' of ' + page.totalPages}">
+                Page 1 of 1
+            </span>
+        </li>
+
+        <li class="page-item" th:classappend="${page.last ? 'disabled' : ''}">
+            <a class="page-link"
+               th:href="@{__${baseUrl}__(page=${page.number + 1})}">Next</a>
+        </li>
+    </ul>
+</nav>
+
+</body>
+</html>

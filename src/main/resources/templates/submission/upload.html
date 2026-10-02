@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--
+<!--/*
   The upload form.
 
   Two attributes on the form are load-bearing:
@@ -14,75 +14,113 @@
     produces a form with no token, and the POST is refused with a 403 before it reaches
     the controller.
 
-  The `accept` attribute on the file input is a convenience, not a control: it filters
-  the file picker, and a request crafted by hand ignores it entirely. Every rule it
-  implies is enforced again on the server, by FileValidationService, which is the only
-  place the decision is actually made (CLAUDE.md §7 rule 4).
+  THE CLIENT-SIDE ATTRIBUTES ARE CONVENIENCES, NOT CONTROLS.
+
+  `accept` filters the file picker, `required` stops an empty field being submitted, and
+  `maxlength` stops over-long typing. Every one of those rules is enforced again on the
+  server — by FileValidationService and SubmissionService — which is where the decision is
+  actually made (CLAUDE.md §7 rule 4). A request crafted by hand ignores all three, and the
+  server refuses it exactly as it would refuse a well-meaning mistake. The attributes exist
+  so that the common error costs a keystroke instead of a round trip, and nothing here
+  would leave a hole if a browser ignored them.
+
+  WHERE A REFUSAL APPEARS.
+
+  SubmissionController flashes `errorField` beside `error` when the refusal is about one
+  input. When it names a field the sentence is rendered under that field, and the top-level
+  alert stays empty so the same message is not shown twice. When it does not — a file that
+  is not a PDF, an unreadable upload — the alert carries it and no field is marked.
 
   Model attributes:
-    currentUser  CurrentUserView  — for the header fragment
+    currentUser  CurrentUserView  — for the navigation fragment
     error        String           — a flash attribute, present only after a refusal
+    errorField   String           — which input the refusal is about, or null
     title        String           — a flash attribute, so a refusal does not discard
     courseCode   String             what the student typed
--->
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Upload a submission — Online Assignment Portal</title>
-    <link rel="stylesheet" th:href="@{/css/portal.css}">
 </head>
 <body>
 
-<header th:replace="~{fragments/portal-header :: header}"></header>
+<section class="row justify-content-center">
+    <div class="col-12 col-lg-8">
 
-<main class="card card-wide">
-    <h1>Upload a submission</h1>
-    <p class="subtitle">PDF only, up to 10 MB.</p>
+        <h1 class="h3">Upload a submission</h1>
+        <p class="text-body-secondary">PDF only, up to 10 MB.</p>
 
-    <!-- Present only after a refused upload. The message comes from the service and is
-         always a complete sentence written by this application; no text the student
-         supplied and no filesystem path ever reaches it (CLAUDE.md §7 rule 11). -->
-    <p class="notice notice-error" th:if="${error}" role="alert" th:text="${error}">
-        The file is larger than the 10 MB limit.
-    </p>
+        <!--/* Shown only when the refusal is about the upload as a whole. A field-specific
+             refusal is rendered under its field instead, so it reads next to the input it
+             is about and is announced there. The message comes from the service and is
+             always a complete sentence written by this application; no text the student
+             supplied and no filesystem path ever reaches it (CLAUDE.md §7 rule 11). */-->
+        <div th:replace="~{fragments/flash :: alert('danger',
+                ${errorField == null ? error : null})}"></div>
 
-    <form th:action="@{/submissions}" method="post" enctype="multipart/form-data">
+        <div class="card">
+            <div class="card-body p-4">
+                <form th:action="@{/submissions}" method="post" enctype="multipart/form-data">
 
-        <label for="title">Title</label>
-        <input type="text"
-               id="title"
-               name="title"
-               maxlength="200"
-               th:value="${title}"
-               autofocus
-               required>
+                    <div class="mb-3">
+                        <label for="title" class="form-label">Title</label>
+                        <input type="text"
+                               class="form-control"
+                               id="title"
+                               name="title"
+                               maxlength="200"
+                               th:value="${title}"
+                               th:attr="aria-invalid=${errorField == 'title' ? 'true' : null},
+                                        aria-describedby=${errorField == 'title' ? 'title-error' : null}"
+                               autofocus
+                               required>
+                        <p th:replace="~{fragments/validation :: fieldError('title', ${error}, ${errorField})}"></p>
+                    </div>
 
-        <label for="courseCode">Course code</label>
-        <input type="text"
-               id="courseCode"
-               name="courseCode"
-               maxlength="20"
-               th:value="${courseCode}"
-               required>
+                    <div class="mb-3">
+                        <label for="courseCode" class="form-label">Course code</label>
+                        <input type="text"
+                               class="form-control"
+                               id="courseCode"
+                               name="courseCode"
+                               maxlength="20"
+                               th:value="${courseCode}"
+                               th:attr="aria-invalid=${errorField == 'courseCode' ? 'true' : null},
+                                        aria-describedby=${errorField == 'courseCode' ? 'courseCode-error' : null}"
+                               required>
+                        <p th:replace="~{fragments/validation :: fieldError('courseCode', ${error}, ${errorField})}"></p>
+                        <div class="form-text">For example CS101. At most 20 characters.</div>
+                    </div>
 
-        <label for="file">PDF file</label>
-        <input type="file"
-               id="file"
-               name="file"
-               accept="application/pdf,.pdf"
-               required>
+                    <div class="mb-4">
+                        <label for="file" class="form-label">PDF file</label>
+                        <input type="file"
+                               class="form-control"
+                               id="file"
+                               name="file"
+                               accept="application/pdf,.pdf"
+                               th:attr="aria-invalid=${errorField == 'file' ? 'true' : null},
+                                        aria-describedby=${errorField == 'file' ? 'file-error' : null}"
+                               required>
+                        <p th:replace="~{fragments/validation :: fieldError('file', ${error}, ${errorField})}"></p>
+                        <div class="form-text">A single PDF, no larger than 10 MB.</div>
+                    </div>
 
-        <button type="submit">Submit for review</button>
-    </form>
+                    <button type="submit" class="btn btn-primary">Submit for review</button>
+                </form>
+            </div>
+        </div>
 
-    <p class="muted">
-        Submitting records the file exactly as uploaded, with a SHA-256 checksum, and
-        starts it in the SUBMITTED state.
-    </p>
+        <p class="text-body-secondary small mt-3">
+            Submitting records the file exactly as uploaded, with a SHA-256 checksum, and
+            starts it in the SUBMITTED state.
+        </p>
 
-    <p><a class="button-link" th:href="@{/submissions}">Back to my submissions</a></p>
-</main>
+        <p><a th:href="@{/submissions}">Back to my submissions</a></p>
+
+    </div>
+</section>
 
 </body>
 </html>

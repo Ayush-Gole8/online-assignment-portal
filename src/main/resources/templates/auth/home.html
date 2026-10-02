@@ -1,57 +1,81 @@
 <!DOCTYPE html>
-<!--
-  The signed-in landing page.
+<!--/*
+  The signed-in landing page, and the destination `defaultSuccessUrl("/")` points at.
 
   It renders `currentUser`, which is a CurrentUserView — a record with an email and a
-  role. It is NOT the User entity: the entity holds a password hash, and a template
-  that can reach a field can render it. See CurrentUserView.
+  role. It is NOT the User entity: the entity holds a password hash, and a template that
+  can reach a field can render it. See CurrentUserView.
 
-  The header is now a shared fragment, so the sign-out form and its CSRF token are
-  defined in exactly one place. See fragments/portal-header.html.
+  This page is deliberately a small, always-correct landing rather than the dashboard.
+  Its job is to answer "am I signed in, and as what?" for every role, including one whose
+  role is not yet wired to a home of its own. The role-specific destinations are links
+  out of here, and each is shown only to a role the route rules actually admit — so an
+  ADMIN sees a link to the review queue and a STUDENT sees a link to their dashboard, and
+  neither is offered a link that would 403 (SecurityConfiguration).
 
   Expected fields on `currentUser` (CurrentUserView): email, role.
--->
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Home — Online Assignment Portal</title>
-    <link rel="stylesheet" th:href="@{/css/portal.css}">
 </head>
 <body>
 
-<header th:replace="~{fragments/portal-header :: header}"></header>
+<section>
+    <h1 class="h3">Signed in</h1>
 
-<main class="card card-wide">
-    <h1>Signed in</h1>
+    <div class="card mb-4">
+        <div class="card-body">
+            <dl class="row mb-0">
+                <dt class="col-sm-3 text-body-secondary fw-normal">Email</dt>
+                <dd class="col-sm-9" th:text="${currentUser.email}">student@example.com</dd>
 
-    <dl class="facts">
-        <dt>Email</dt>
-        <dd th:text="${currentUser.email}">student@example.com</dd>
+                <dt class="col-sm-3 text-body-secondary fw-normal">Role</dt>
+                <!--/* Rendered from the Role enum, so this is exactly the value stored in the
+                     `role` column and matched by the route rules. name() is called explicitly
+                     because an enum rendered without it goes through toString(). */-->
+                <dd class="col-sm-9"><code th:text="${currentUser.role.name()}">STUDENT</code></dd>
+            </dl>
+        </div>
+    </div>
 
-        <dt>Role</dt>
-        <!-- Rendered from the Role enum, so this is exactly the value stored in the
-             `role` column and matched by the route rules. -->
-        <dd><code th:text="${currentUser.role}">STUDENT</code></dd>
-    </dl>
+    <!--/* What each role may do next. The STUDENT block is the submission workflow; the
+         REVIEWER/ADMIN block is the review workflow. Both are gated on the same enum the
+         route rules use, so the links and the rules cannot disagree. */-->
+    <div class="card">
+        <div class="card-body">
+            <h2 class="h5">What you can do</h2>
 
-    <h2>Submissions</h2>
-    <p>
-        Upload a PDF and track it through the review process. A submission starts in the
-        SUBMITTED state, and its status history is recorded against it.
-    </p>
-    <p>
-        <a class="button-link" th:href="@{/submissions/new}">Upload a submission</a>
-        &nbsp;
-        <a class="button-link" th:href="@{/submissions}">My submissions</a>
-    </p>
+            <div th:if="${currentUser.role.name() == 'STUDENT'}">
+                <p>
+                    Upload a PDF and track it through the review process. A submission starts
+                    in the SUBMITTED state, and its status history is recorded against it.
+                </p>
+                <p class="mb-0">
+                    <a class="btn btn-primary" th:href="@{/student/dashboard}">Go to dashboard</a>
+                    <a class="btn btn-outline-secondary" th:href="@{/submissions/new}">Upload a submission</a>
+                </p>
+            </div>
 
-    <p class="muted">
+            <div th:if="${currentUser.role.name() == 'REVIEWER' or currentUser.role.name() == 'ADMIN'}">
+                <p>
+                    Work the queue of submissions awaiting a decision, read the artefact, and
+                    record one final approve or reject decision.
+                </p>
+                <p class="mb-0">
+                    <a class="btn btn-primary" th:href="@{/review/queue}">Open the review queue</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <p class="text-body-secondary small mt-4">
         Your role is read from your account on every request. Disabling the account takes
         effect on your next request, because the session holds server-side state rather
         than a self-contained token.
     </p>
-</main>
+</section>
 
 </body>
 </html>

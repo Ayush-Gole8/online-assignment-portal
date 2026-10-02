@@ -9,6 +9,8 @@ import com.vit.assignmentportal.submission.SubmissionService;
 import com.vit.assignmentportal.submission.SubmissionSummary;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -53,17 +55,17 @@ public class ReviewService {
     }
 
     /**
-     * The queue: submissions still awaiting a decision, longest-waiting first (FR-16).
+     * One page of the queue: submissions still awaiting a decision, longest-waiting first (FR-16).
      *
      * <p>Read models, not entities — the queue is rendered by a template, and
      * {@link SubmissionSummary} is the type that exists so a view cannot reach a field it should
-     * not render.
+     * not render. The mapping happens after the page is read, so only the rows on this page are
+     * projected; the total the page carries is still the count of the whole queue, which is what
+     * the pager needs.
      */
     @Transactional(readOnly = true)
-    public List<SubmissionSummary> queue() {
-        return submissionService.listAwaitingReview().stream()
-                .map(SubmissionSummary::from)
-                .toList();
+    public Page<SubmissionSummary> queue(Pageable pageable) {
+        return submissionService.listAwaitingReview(pageable).map(SubmissionSummary::from);
     }
 
     /**

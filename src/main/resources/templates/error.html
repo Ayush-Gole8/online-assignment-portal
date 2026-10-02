@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<!--/*
+  The page every unhandled error renders as.
+
+  Spring Boot's BasicErrorController maps /error and answers with the view named "error",
+  which its Thymeleaf resolver turns into this file. Nothing in this application renders
+  it directly, and nothing has to route to it: a 404, a 500, or an exception that reaches
+  the container all end up here.
+
+  THE ONE THING THIS PAGE MUST NOT DO IS EXPLAIN THE FAILURE.
+
+  The model carries `message`, and `server.error.include-message: never` in
+  application.yml keeps it empty — so it is not rendered at all, rather than rendered and
+  relied upon to be blank. A stack trace, a SQL fragment, a class name, or a filesystem
+  path shown to a user is an information leak, and "we only show it in development" is how
+  one reaches production (CLAUDE.md §7 rule 11). The status code is shown because it is
+  the only part of the failure that is not internals: it tells the user whether the page
+  was missing or something broke, and it is the same number their browser already received.
+
+  It renders even with no session. The error dispatch is permitted explicitly in
+  SecurityConfiguration — without that rule an anonymous visitor who mistypes a URL would
+  be redirected to the sign-in page instead of being told the page does not exist, which
+  reads as "the site is broken" rather than "that address is wrong".
+
+  The navbar fragment tolerates the absence of `currentUser`, which is what makes it
+  reusable here: BasicErrorController contributes no application model, so there is no
+  principal to render even for a signed-in user.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
+<head>
+    <title th:text="${status != null ? 'Error ' + status + ' — Online Assignment Portal'
+                                     : 'Something went wrong — Online Assignment Portal'}">
+        Something went wrong — Online Assignment Portal
+    </title>
+</head>
+<body>
+
+<section class="row justify-content-center">
+    <div class="col-12 col-md-8 col-lg-6">
+        <div class="card">
+            <div class="card-body p-4">
+
+                <h1 class="h4" th:text="${status != null ? 'Error ' + status : 'Something went wrong'}">
+                    Something went wrong
+                </h1>
+
+                <!--/* 404 is by far the most common way to arrive here, and it has a remedy the
+                     user can act on, so it gets its own sentence. Everything else gets one
+                     that is true without guessing at a cause. */-->
+                <p th:if="${status != null and status == 404}">
+                    That page does not exist. It may have been moved, or the address may have
+                    been mistyped.
+                </p>
+                <p th:unless="${status != null and status == 404}">
+                    Something went wrong while handling your request. Nothing you did caused it,
+                    and nothing was changed. Please try again.
+                </p>
+
+                <p class="text-body-secondary small">
+                    If it keeps happening, quote the number above when you report it.
+                </p>
+
+                <a th:href="@{/}" class="btn btn-primary">Return to the home page</a>
+
+            </div>
+        </div>
+    </div>
+</section>
+
+</body>
+</html>

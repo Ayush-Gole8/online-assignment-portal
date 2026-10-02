@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!--/*
+  The status badge, in one place because four pages render it.
+
+  Used as:  <span th:replace="~{fragments/status :: badge(${submission.status})}"></span>
+
+  The class is derived from the status rather than chosen by an if/else chain, so adding a
+  fourth status later shows up as a missing colour instead of silently rendering as one of
+  the three existing outcomes. The colours themselves live in portal.css — this file
+  decides which class, the stylesheet decides what it looks like.
+
+  `#strings.toLowerCase` is applied to `name()` explicitly. An enum rendered without
+  `.name()` goes through `toString()`, and `.toString()` on an enum is not the same thing
+  as `.name()` in general — it happens to be here, but a badge that depends on that
+  coincidence would break the moment somebody added a `toString()` override.
+
+  The text is the enum name itself, so the badge reads SUBMITTED / APPROVED / REJECTED —
+  the same vocabulary the database stores and the route rules use.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fragment</title>
+</head>
+<body>
+
+<span th:fragment="badge(status)"
+      class="badge status"
+      th:classappend="${'status-' + #strings.toLowerCase(status.name())}"
+      th:text="${status}">SUBMITTED</span>
+
+</body>
+</html>

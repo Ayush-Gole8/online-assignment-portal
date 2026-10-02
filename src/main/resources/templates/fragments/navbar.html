@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<!--/*
+  The navigation bar, shared by every page behind authentication.
+
+  A fragment rather than a copy per page. The sign-out control is the reason: it is a
+  POST form, it needs a CSRF token, and it must carry the same URL everywhere. Six copies
+  of that is six places to get it wrong — and getting it wrong produces a 403 on a button
+  that looks fine.
+
+  Used as:  <nav th:replace="~{fragments/navbar :: navbar}"></nav>
+
+  Expects `currentUser` in the model, which is a CurrentUserView — an email and a role,
+  never the User entity. Every controller that renders a page behind authentication puts
+  it there: HomeController and the two feature controllers via a @ModelAttribute method.
+  It tolerates the attribute being ABSENT, which is what lets the error page — rendered by
+  Spring Boot's BasicErrorController with no application model at all — reuse this
+  fragment and show "Sign in" instead of a broken control.
+
+  The links are gated by role, and the gating is presentation, not control. Each route is
+  guarded in SecurityConfiguration; a role that cannot reach a page is not offered a link
+  to it, because a link that 403s is a lie about what the page can do. The route rule is
+  the authority: this condition could be deleted and nothing would become reachable.
+
+  `currentUser.role` is the Role enum, so the comparison is against a name rather than a
+  string constant, and `role.name()` is called explicitly — an enum rendered without it
+  goes through toString().
+
+  No collapse toggle and no `navbar-toggler`. Bootstrap's collapsing navbar is JavaScript,
+  and this application ships none: the bar wraps its items onto a second line on a narrow
+  screen instead of hiding them behind a button that would do nothing with scripting off.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fragment</title>
+</head>
+<body>
+
+<nav class="navbar navbar-expand navbar-dark bg-dark flex-wrap"
+     th:fragment="navbar"
+     aria-label="Main">
+    <div class="container flex-wrap">
+
+        <a class="navbar-brand me-3" th:href="@{/}">Online Assignment Portal</a>
+
+        <!--/* Shown only to a signed-in user, and only the destinations their role may
+             actually reach. A STUDENT gets the dashboard, the upload form and their list;
+             a REVIEWER or ADMIN gets the review queue. Both are correct for the route
+             rules in SecurityConfiguration. */-->
+        <ul class="navbar-nav flex-row flex-wrap gap-3 me-auto mb-0"
+            th:if="${currentUser != null}">
+            <li class="nav-item" th:if="${currentUser.role.name() == 'STUDENT'}">
+                <a class="nav-link py-1" th:href="@{/student/dashboard}">Dashboard</a>
+            </li>
+            <li class="nav-item" th:if="${currentUser.role.name() == 'STUDENT'}">
+                <a class="nav-link py-1" th:href="@{/submissions}">My submissions</a>
+            </li>
+            <li class="nav-item" th:if="${currentUser.role.name() == 'STUDENT'}">
+                <a class="nav-link py-1" th:href="@{/submissions/new}">Upload</a>
+            </li>
+            <li class="nav-item"
+                th:if="${currentUser.role.name() == 'REVIEWER' or currentUser.role.name() == 'ADMIN'}">
+                <a class="nav-link py-1" th:href="@{/review/queue}">Review queue</a>
+            </li>
+        </ul>
+
+        <!--/* As with every form in this application, th:action is what causes Thymeleaf
+             to inject the CSRF token; a plain action attribute would yield a 403. Signing
+             out is a POST, not a link, because it changes server-side state and a GET
+             logout can be fired by an <img> tag on any third-party page. */-->
+        <form th:if="${currentUser != null}"
+              th:action="@{/logout}"
+              method="post"
+              class="d-flex align-items-center gap-3 mb-0">
+            <span class="navbar-text text-body-secondary small"
+                  th:text="${currentUser.email}">signed-in@example.com</span>
+            <button type="submit" class="btn btn-outline-light btn-sm">Sign out</button>
+        </form>
+
+        <!--/* The anonymous case. Reached only by the error page today, but it is the
+             correct thing to render when there is no principal: offering a sign-out
+             button to nobody would be a control that does not work. */-->
+        <a th:if="${currentUser == null}"
+           class="btn btn-outline-light btn-sm"
+           th:href="@{/login}">Sign in</a>
+
+    </div>
+</nav>
+
+</body>
+</html>

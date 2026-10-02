@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!--
+<!--/*
   One submission, as a reviewer sees it, with the decision form (FR-17…FR-20).
 
   `submission` is a SubmissionDetail and `history` is a List<SubmissionHistoryEntry> —
@@ -15,134 +15,161 @@
   send for `outcome`. The reason field is marked `required`, and the Approve button carries
   `formnovalidate` — so the browser insists on a reason when rejecting, and lets an
   approval through with the field empty, without any JavaScript. The service enforces both
-  rules regardless; this only saves a round trip.
+  rules regardless; this only saves a round trip. That is the whole of the client-side
+  behaviour on this page, and it is a convenience layered over a check that already exists
+  rather than a replacement for it.
 
   Model attributes:
-    currentUser  CurrentUserView          — for the header fragment
+    currentUser  CurrentUserView          — for the navigation fragment
     submission   SubmissionDetail
     history      List<SubmissionHistoryEntry>
     error        String                   — a flash attribute after a refused decision
     note         String                   — a flash attribute: the reason, handed back on refusal
     decided      SubmissionStatus         — a flash attribute after a recorded decision
--->
-<html xmlns:th="http://www.thymeleaf.org" lang="en">
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en"
+      th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title th:text="${submission.title} + ' — Review — Online Assignment Portal'">Review</title>
-    <link rel="stylesheet" th:href="@{/css/portal.css}">
 </head>
 <body>
 
-<header th:replace="~{fragments/portal-header :: header}"></header>
+<section>
 
-<main class="card card-wide">
+    <!--/* The recorded outcome, or the refusal, as a flash attribute: present once after the
+         redirect, gone on a refresh. `decided` and `error` are never both set — the
+         controller sets exactly one. */-->
+    <div th:replace="~{fragments/flash :: alert('success',
+            ${decided != null ? 'The submission was ' + decided + '.' : null})}"></div>
 
-    <p class="notice notice-success" th:if="${decided}" role="status">
-        The submission was <span th:text="${decided}">APPROVED</span>.
-    </p>
+    <!--/* The refusal message is composed by ReviewService and is safe to render verbatim:
+         it never contains text the reviewer supplied, a path, or a SQL statement. */-->
+    <div th:replace="~{fragments/flash :: alert('danger', ${error})}"></div>
 
-    <!-- A refused decision. The message is composed by ReviewService and is safe to render
-         verbatim: it never contains text the reviewer supplied, a path, or a SQL statement. -->
-    <p class="notice notice-error" th:if="${error}" role="alert" th:text="${error}">
-        A rejection requires a reason.
-    </p>
-
-    <h1 th:text="${submission.title}">Coursework</h1>
-    <p class="subtitle" th:text="${submission.courseCode}">CS101</p>
-
-    <p>
-        <span class="status"
-              th:classappend="${'status-' + #strings.toLowerCase(submission.status.name())}"
-              th:text="${submission.status}">SUBMITTED</span>
-    </p>
-
-    <h2>The file</h2>
-    <dl class="facts">
-        <dt>Original name</dt>
-        <dd th:text="${submission.originalFileName}">essay.pdf</dd>
-
-        <dt>Type</dt>
-        <dd th:text="${submission.contentType}">application/pdf</dd>
-
-        <dt>Size</dt>
-        <dd th:text="${submission.readableSize()}">1.5 MB</dd>
-
-        <dt>SHA-256</dt>
-        <dd><code class="checksum" th:text="${submission.checksumSha256}">9f86d081…</code></dd>
-    </dl>
-
-    <!-- A reviewer may read the artefact; they may not change it. This link is a GET that
-         serves the bytes as an attachment, and there is no upload or edit control on this
-         page — the only state a reviewer can change is the decision below. -->
-    <p>
-        <a class="button-link"
-           th:href="@{/review/submissions/{id}/file(id=${submission.id})}"
-           th:text="${'Download ' + submission.originalFileName}">Download essay.pdf</a>
-    </p>
-
-    <h2>History</h2>
-    <ol class="timeline">
-        <li th:each="entry : ${history}">
-            <p class="timeline-when" th:text="${entry.occurredOn()}">1 Oct 2026, 09:15 UTC</p>
-            <p class="timeline-what">
-                <span th:if="${entry.isCreation()}">Submitted for review</span>
-                <span th:unless="${entry.isCreation()}"
-                      th:text="${'Decision: ' + entry.toStatus}">Decision: APPROVED</span>
-            </p>
-        </li>
-    </ol>
-
-    <!-- The decision. th:action is what makes Thymeleaf inject the CSRF token; a plain
-         action attribute would produce a 403. -->
-    <div th:if="${submission.status.name() == 'SUBMITTED'}">
-        <h2>Your decision</h2>
-        <p class="muted">
-            A decision is final. Choose carefully — this submission cannot be decided again.
-        </p>
-
-        <form th:action="@{/review/submissions/{id}(id=${submission.id})}"
-              method="post">
-
-            <label for="note">Reason for rejection</label>
-            <!-- `required` because the browser should refuse to submit a rejection with no
-                 reason. th:value hands back the reason after a refusal, so a reviewer who
-                 wrote one does not lose it. -->
-            <textarea id="note" name="note" rows="5" maxlength="2000" required
-                      placeholder="Explain what the student must change. Required when rejecting."
-                      th:value="${note}"></textarea>
-
-            <div class="review-actions">
-                <!-- formnovalidate: an approval carries no reason, so the required field must
-                     not block it. The service still refuses an approval that does carry one. -->
-                <button type="submit" name="outcome" value="APPROVED" formnovalidate
-                        class="button primary">Approve</button>
-                <button type="submit" name="outcome" value="REJECTED"
-                        class="button danger">Reject</button>
-            </div>
-        </form>
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+        <div>
+            <h1 class="h3 mb-1" th:text="${submission.title}">Coursework</h1>
+            <p class="text-body-secondary" th:text="${submission.courseCode}">CS101</p>
+        </div>
+        <span th:replace="~{fragments/status :: badge(${submission.status})}">SUBMITTED</span>
     </div>
 
-    <!-- Already decided: shown instead of the form, with the outcome that stands. -->
-    <div th:unless="${submission.status.name() == 'SUBMITTED'}">
-        <h2>Decision</h2>
-        <dl class="facts">
-            <dt>Reviewed</dt>
-            <dd th:text="${submission.reviewedOn()}">2 Oct 2026, 11:00 UTC</dd>
-        </dl>
+    <div class="row g-4">
+        <div class="col-12 col-lg-7">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">The file</h2>
+                    <dl class="row mb-3">
+                        <dt class="col-sm-4 text-body-secondary fw-normal">Original name</dt>
+                        <dd class="col-sm-8" th:text="${submission.originalFileName}">essay.pdf</dd>
 
-        <div th:if="${submission.rejectionReason != null}">
-            <h3 class="section-heading">Reason for rejection</h3>
-            <p class="notice notice-error" th:text="${submission.rejectionReason}">
-                The submitted file was not a readable PDF.
-            </p>
+                        <dt class="col-sm-4 text-body-secondary fw-normal">Type</dt>
+                        <dd class="col-sm-8" th:text="${submission.contentType}">application/pdf</dd>
+
+                        <dt class="col-sm-4 text-body-secondary fw-normal">Size</dt>
+                        <dd class="col-sm-8" th:text="${submission.readableSize()}">1.5 MB</dd>
+
+                        <!--/* The digest of the bytes as stored. A reviewer who re-downloads the
+                             file can check it against this and know they read the same artefact
+                             the student uploaded. */-->
+                        <dt class="col-sm-4 text-body-secondary fw-normal">SHA-256</dt>
+                        <dd class="col-sm-8"><code class="checksum" th:text="${submission.checksumSha256}">9f86d081…</code></dd>
+                    </dl>
+
+                    <!--/* A reviewer may read the artefact; they may not change it. This is a GET
+                         that serves the bytes as an attachment, and there is no upload or edit
+                         control on this page — the only state a reviewer can change is the
+                         decision below. */-->
+                    <a class="btn btn-outline-secondary"
+                       th:href="@{/review/submissions/{id}/file(id=${submission.id})}"
+                       th:text="${'Download ' + submission.originalFileName}">Download essay.pdf</a>
+                </div>
+            </div>
         </div>
 
-        <p class="muted">This submission has already been decided, and a decision is final.</p>
+        <div class="col-12 col-lg-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h2 class="h5">History</h2>
+                    <ol class="timeline mb-0">
+                        <li th:each="entry : ${history}">
+                            <p class="timeline-when mb-0 text-body-secondary small"
+                               th:text="${entry.occurredOn()}">1 Oct 2026, 09:15 UTC</p>
+                            <p class="timeline-what mb-0 fw-semibold">
+                                <span th:if="${entry.isCreation()}">Submitted for review</span>
+                                <span th:unless="${entry.isCreation()}"
+                                      th:text="${'Decision: ' + entry.toStatus}">Decision: APPROVED</span>
+                            </p>
+                        </li>
+                    </ol>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <p><a class="button-link" th:href="@{/review}">Back to the queue</a></p>
-</main>
+    <!--/* The decision. th:action is what makes Thymeleaf inject the CSRF token; a plain
+         action attribute would produce a 403. */-->
+    <div class="card mt-4" th:if="${submission.status.name() == 'SUBMITTED'}">
+        <div class="card-body">
+            <h2 class="h5">Your decision</h2>
+            <p class="text-body-secondary">
+                A decision is final. Choose carefully — this submission cannot be decided again.
+            </p>
+
+            <form th:action="@{/review/submissions/{id}(id=${submission.id})}" method="post">
+
+                <div class="mb-3">
+                    <label for="note" class="form-label">Reason for rejection</label>
+                    <p id="note-hint" class="form-text mt-0">
+                        Required when rejecting; an approval must not carry one.
+                    </p>
+                    <!--/* `required` because the browser should refuse to submit a rejection with no
+                         reason. th:value hands the reason back after a refusal, so a reviewer who
+                         wrote one does not lose it. `aria-describedby` ties the field to the hint. */-->
+                    <textarea id="note" name="note" rows="5" maxlength="2000" required
+                              class="form-control"
+                              aria-describedby="note-hint"
+                              placeholder="Explain what the student must change."
+                              th:value="${note}"></textarea>
+                </div>
+
+                <div class="d-flex flex-wrap gap-2">
+                    <!--/* formnovalidate: an approval carries no reason, so the required field must
+                         not block it. The service still refuses an approval that does carry one. */-->
+                    <button type="submit" name="outcome" value="APPROVED" formnovalidate
+                            class="btn btn-success">Approve</button>
+                    <button type="submit" name="outcome" value="REJECTED"
+                            class="btn btn-danger">Reject</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!--/* Already decided: shown instead of the form, with the outcome that stands. */-->
+    <div class="card mt-4" th:unless="${submission.status.name() == 'SUBMITTED'}">
+        <div class="card-body">
+            <h2 class="h5">Decision</h2>
+
+            <dl class="row">
+                <dt class="col-sm-4 text-body-secondary fw-normal">Reviewed</dt>
+                <dd class="col-sm-8" th:text="${submission.reviewedOn()}">2 Oct 2026, 11:00 UTC</dd>
+            </dl>
+
+            <div th:if="${submission.rejectionReason != null}">
+                <h3 class="h6 text-danger">Reason for rejection</h3>
+                <p class="alert alert-danger" th:text="${submission.rejectionReason}">
+                    The submitted file was not a readable PDF.
+                </p>
+            </div>
+
+            <p class="text-body-secondary mb-0">
+                This submission has already been decided, and a decision is final.
+            </p>
+        </div>
+    </div>
+
+    <p class="mt-4"><a th:href="@{/review/queue}">Back to the queue</a></p>
+</section>
 
 </body>
 </html>

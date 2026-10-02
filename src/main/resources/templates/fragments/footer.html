@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!--/*
+  The page footer, shared by the signed-in layout and the sign-in layout.
+
+  It exists so that "what is this and what is it built on" is answered in one place rather
+  than in every page or in none. It carries no links and no controls: a footer is the
+  easiest place to put a menu nobody maintains, and this application has one navigation,
+  at the top.
+
+  `mt-auto` inside the flexible column body pushes it to the bottom of a short page, so a
+  page with little content does not leave the footer floating mid-screen.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fragment</title>
+</head>
+<body>
+
+<footer class="border-top py-3 mt-auto bg-body-tertiary" th:fragment="footer">
+    <div class="container d-flex flex-wrap justify-content-between gap-2">
+        <span class="text-body-secondary small">
+            Online Assignment Portal — coursework submission and review.
+        </span>
+        <span class="text-body-secondary small">
+            Java 21 · Spring Boot 4 · MySQL 8.4
+        </span>
+    </div>
+</footer>
+
+</body>
+</html>
