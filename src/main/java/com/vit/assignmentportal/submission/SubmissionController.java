@@ -4,6 +4,7 @@ import com.vit.assignmentportal.auth.AuthenticatedUser;
 import com.vit.assignmentportal.auth.CurrentUserService;
 import com.vit.assignmentportal.auth.CurrentUserView;
 import java.util.UUID;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -18,7 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 /**
- * The student's pages: upload a file, see what has been handed in, open one of them.
+ * The student's pages: upload a file, see what has been handed in, open one of them, download it.
  *
  * <h2>Every handler ends in a redirect, including the failures</h2>
  *
@@ -119,6 +120,11 @@ public class SubmissionController {
     /**
      * One of the signed-in student's own submissions.
      *
+     * <p>Carries the submission's transitions as well as its current state, so the page can show
+     * the chronological history alongside the decision (FR-15, FR-21). Like the submission itself,
+     * the history is fetched <em>by owner</em>: {@code historyForStudent} looks the submission up
+     * with the caller's identifier first, so another student's history cannot be reached.
+     *
      * @throws SubmissionNotFoundException if it does not exist or is not theirs, which renders as
      *                                     a 404 either way
      */
@@ -128,8 +134,33 @@ public class SubmissionController {
 
         model.addAttribute("submission",
                 SubmissionDetail.from(submissionService.findForStudent(student.id(), id)));
+        model.addAttribute("history", submissionService.historyForStudent(student.id(), id).stream()
+                .map(SubmissionHistoryEntry::from)
+                .toList());
 
         return "submission/detail";
+    }
+
+    /**
+     * The student's own uploaded file, so they can check what they handed in (FR-13).
+     *
+     * <p>Ownership is enforced by {@code downloadForStudent}, which resolves the submission with
+     * the caller's identifier — the same query-not-check rule as {@link #detail}. A submission
+     * that is not theirs does not exist, and the missing file follows from that rather than from a
+     * separate decision here.
+     *
+     * <p>The response is built by {@link SubmissionFileAttachment}, which is also what the
+     * reviewer's route uses: an attachment, a fixed {@code application/pdf}, and {@code nosniff}
+     * ({@code CLAUDE.md} §7 rule 10). The storage identifier is never disclosed — only the
+     * normalised original file name.
+     *
+     * @throws SubmissionNotFoundException if it does not exist or is not theirs
+     * @throws StorageException if the row exists but the bytes on the volume do not
+     */
+    @GetMapping("/{id}/file")
+    public ResponseEntity<byte[]> download(@PathVariable UUID id) {
+        AuthenticatedUser student = currentUserService.requireCurrentUser();
+        return SubmissionFileAttachment.of(submissionService.downloadForStudent(student.id(), id));
     }
 
     /**

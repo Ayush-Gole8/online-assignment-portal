@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!--
+  The reviewer's queue: submissions waiting for a decision (FR-16).
+
+  `submissions` is a List<SubmissionSummary> — read models, never Submission entities.
+  The list contains only rows still in SUBMITTED: the query in SubmissionRepository
+  filters by status, so an already-decided submission is never handed to this page and
+  cannot be rendered as if it were waiting.
+
+  Reaching this page is restricted by SecurityConfiguration: /review/** requires REVIEWER
+  or ADMIN. The page renders the same for both, because an ADMIN's decision is recorded
+  exactly as a REVIEWER's.
+
+  Model attributes:
+    currentUser  CurrentUserView          — for the header fragment
+    submissions  List<SubmissionSummary>
+-->
+<html xmlns:th="http://www.thymeleaf.org" lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Review queue — Online Assignment Portal</title>
+    <link rel="stylesheet" th:href="@{/css/portal.css}">
+</head>
+<body>
+
+<header th:replace="~{fragments/portal-header :: header}"></header>
+
+<main class="card card-wide">
+    <h1>Review queue</h1>
+    <p class="subtitle">Submissions waiting for a decision, longest waiting first.</p>
+
+    <!-- The empty state is a sentence, not an empty table: a table with headers and no
+         rows reads as a loading failure. -->
+    <p class="muted" th:if="${#lists.isEmpty(submissions)}">
+        Nothing is waiting for review.
+    </p>
+
+    <table class="listing" th:unless="${#lists.isEmpty(submissions)}">
+        <thead>
+        <tr>
+            <th scope="col">Title</th>
+            <th scope="col">Course</th>
+            <th scope="col">File</th>
+            <th scope="col">Submitted</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="submission : ${submissions}">
+            <td>
+                <!-- The link carries only the identifier; the reviewer's detail handler is
+                     what authorises the request, by role at the route. -->
+                <a th:href="@{/review/submissions/{id}(id=${submission.id})}"
+                   th:text="${submission.title}">Coursework</a>
+            </td>
+            <td th:text="${submission.courseCode}">CS101</td>
+            <td th:text="${submission.originalFileName}">essay.pdf</td>
+            <td th:text="${submission.submittedOn()}">1 Oct 2026, 09:15 UTC</td>
+        </tr>
+        </tbody>
+    </table>
+</main>
+
+</body>
+</html>

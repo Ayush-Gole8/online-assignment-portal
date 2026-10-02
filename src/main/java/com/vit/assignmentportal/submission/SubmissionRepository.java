@@ -1,5 +1,6 @@
 package com.vit.assignmentportal.submission;
 
+import com.vit.assignmentportal.common.SubmissionStatus;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -8,15 +9,16 @@ import org.springframework.data.jpa.repository.JpaRepository;
 /**
  * Persistence for {@link Submission}.
  *
- * <p>Note which methods are <em>not</em> here. There is no {@code findAll}, and no
- * {@code findById} inherited into use, because both would let a caller load a submission without
- * saying whose it is. Every read this feature performs is expressed as a query that carries the
- * owner, so a student's isolation is a property of the interface rather than a check somebody has
- * to remember to write at each call site.
+ * <p>Note how the reads divide. Every query a <strong>student</strong> makes carries the owner, so
+ * their isolation is a property of this interface rather than a check somebody has to remember to
+ * write at each call site. The <strong>reviewer</strong>'s reads do not, because a reviewer is
+ * authorised by role at the route and reviewing only one's own work would be meaningless.
  *
- * <p>{@code JpaRepository} still contributes {@code findById} and {@code findAll}. They are not
- * hidden — that would mean not extending it — but nothing in this feature calls them, and
- * {@code SubmissionService} is the only intended entry point.
+ * <p>There is deliberately no {@code findAll} in use. {@code JpaRepository} contributes it, and
+ * {@code findById} — which the reviewer path does call, through
+ * {@code SubmissionService.findForReview}, after the {@code /review/**} role rule has already
+ * admitted the request. They are not hidden; that would mean not extending {@code JpaRepository}.
+ * {@code SubmissionService} is the only intended entry point either way.
  */
 public interface SubmissionRepository extends JpaRepository<Submission, UUID> {
 
@@ -41,4 +43,17 @@ public interface SubmissionRepository extends JpaRepository<Submission, UUID> {
      * @return the submission, or empty when it does not exist or is not this student's
      */
     Optional<Submission> findByIdAndStudentId(UUID id, UUID studentId);
+
+    /**
+     * Every submission in one status, oldest first — the reviewer's queue (FR-16).
+     *
+     * <p>Ascending by {@code created_at}, unlike the student's list: a queue is worked through, so
+     * the submission that has waited longest comes first. The index on {@code (status, created_at)}
+     * answers both the filter and the sort.
+     *
+     * <p>Not scoped by any user, and that is deliberate — a reviewer is authorised by role at the
+     * route, not by ownership. This is the one query in this interface that does not carry an
+     * owner, and the comment on the type explains why the others all do.
+     */
+    List<Submission> findByStatusOrderByCreatedAtAsc(SubmissionStatus status);
 }

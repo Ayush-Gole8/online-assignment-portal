@@ -12,11 +12,10 @@ package com.vit.assignmentportal.common;
  * middle of an ordinal-encoded enum would silently reinterpret every existing row
  * (docs/architecture/data-model.md §3).
  *
- * <p><strong>Only {@link #SUBMITTED} is reachable in this milestone.</strong> There is no
- * transition method and no code path that produces the other two; they exist so that the
- * database {@code CHECK} constraint and the column's vocabulary are fixed once, rather than
- * widened by a migration when the review feature lands. {@code SubmissionService} can only
- * create a {@code SUBMITTED} submission.
+ * <p>The reachable transitions are exactly {@code SUBMITTED -> APPROVED} and
+ * {@code SUBMITTED -> REJECTED}. {@link #SUBMITTED} is the only non-terminal value, and the
+ * {@code Submission} entity has no method that moves a row out of a terminal one — a decision is
+ * final (FR-20).
  *
  * <p>A rejected submission is {@link #REJECTED}, not deleted. Rejection is a terminal state with
  * a recorded reason, which is what the student's status history reads from

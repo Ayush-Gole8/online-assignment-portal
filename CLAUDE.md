@@ -280,18 +280,21 @@ container (docs/testing/strategy.md §3.2).
 
 ## 11. Current project status
 
-**Milestone 3 — the student submission vertical slice is implemented. Its tests have not been
-executed, so this milestone's suite is written but unproven.**
+**Milestone 4 — the reviewer decision, the status history, and file download are implemented. No
+test suite later than Milestone 2's has been executed, so Milestones 3 and 4 are written but
+unproven.**
 
 The last recorded `mvn clean verify` (2026-10-01T12:37) was **green**: 30 Failsafe tests and 5
-Surefire tests, zero failures. That run covered Milestone 2's code and predates every file
-described below, so it is evidence for the two milestones behind us and for nothing in this one.
-The toolchain it used is recorded in
-[`docs/operations/toolchain.md`](docs/operations/toolchain.md).
+Surefire tests, zero failures. That run covered Milestone 2's code and predates every Milestone 3
+and 4 file described below, so it is evidence for the two milestones behind us and for nothing in
+the two in front of us. The toolchain it used is recorded in
+[`docs/operations/toolchain.md`](docs/operations/toolchain.md), whose §9 records the same gap.
 
 Milestone 1 established the build and runtime. Milestone 2 added database-backed authentication.
-Milestone 3 adds the first feature that accepts user-supplied content, which is where the
-pipeline's interest really begins.
+Milestone 3 added the first feature that accepts user-supplied content. Milestone 4 closes the
+workflow loop: a submission can now be decided, the decision is recorded, and the student can read
+it — which is also the first milestone whose tests exercise a state transition end to end.
+
 
 ### What exists
 
@@ -319,32 +322,53 @@ has a default. Documented in [`docs/architecture/security.md`](docs/architecture
 `StorageProperties`, `StorageException`, `FileValidationService`, `ChecksumService`. PDF-only,
 ≤ 10 MB, validated by content and not by name; a server-generated identifier that makes path
 traversal unrepresentable; SHA-256 recorded for every stored file. Bytes are written outside any
-servable path.
+servable path. `StorageService.load` was added in Milestone 4, when the download route gave it a
+caller.
 
-**`submission/` — the student's slice (Milestone 3).** `Submission` entity and repository,
-`SubmissionService`, `SubmissionController`, the two read models, and three templates. Routes:
-`GET /submissions/new`, `POST /submissions`, `GET /submissions`, `GET /submissions/{id}`. A
-student reaches only their own work — the ownership test is a `WHERE` clause, so somebody else's
-submission is never loaded rather than loaded and refused. The file and the row cannot be
-committed together, so `SubmissionService` orders the writes and removes the file if the row does
-not commit.
+**`submission/` — the student's slice (Milestone 3), and the transition it owns (Milestone 4).**
+`Submission` entity and repository, `SubmissionService`, `SubmissionController`, the read models,
+and three templates. Student routes: `GET /submissions/new`, `POST /submissions`,
+`GET /submissions`, `GET /submissions/{id}`, `GET /submissions/{id}/file`. A student reaches only
+their own work — the ownership test is a `WHERE` clause, so somebody else's submission is never
+loaded rather than loaded and refused. The file and the row cannot be committed together, so
+`SubmissionService` orders the writes and removes the file if the row does not commit.
+
+Milestone 4 added `SubmissionStatusHistory` — an append-only entity and repository — and
+`SubmissionService.recordDecision`, which applies a status change and writes its history row in one
+transaction. The terminality rule lives on the entity (`Submission.approve` / `reject` throw
+`SubmissionAlreadyDecidedException` for a row that is not `SUBMITTED`), so a second approval, a
+second rejection, and a decision on already-decided work are all refused at the same place.
+`Submission.version` is a `@Version` column, so two reviewers deciding concurrently cannot silently
+overwrite one another.
+
+**`review/` — the reviewer's slice (Milestone 4).** `ReviewService`, `ReviewController`,
+`ReviewDecision`, `InvalidReviewException`, and two templates. Routes: `GET /review` (the queue of
+`SUBMITTED` work), `GET /review/submissions/{id}`, `POST /review/submissions/{id}` (decide),
+`GET /review/submissions/{id}/file`. The decision *policy* lives here — a rejection requires a
+reason, an approval must not carry one, and the outcome must be `APPROVED` or `REJECTED`. The
+*transition* does not: `ReviewService` calls `SubmissionService`, because `review` may not import a
+submission repository or mutate a `Submission` (`application-structure.md` §4 rule 1). Reviewers
+have no route that accepts a file; the artefact is read-only to them.
 
 **Migrations.** `V1__baseline.sql` creates `users`; `V2__submissions.sql` creates `submissions`
-with its `CHECK` constraints, unique stored-name index, and foreign keys. `ApplicationContextIT`
+with its `CHECK` constraints, unique stored-name index, and foreign keys;
+`V3__submission_status_history.sql` creates the append-only history table. `ApplicationContextIT`
 exercises each constraint by inserting rows the service would never produce.
 
 ### Not yet present — deliberately
 
-- **No review feature.** `/review/**` and `/admin/**` are guarded but have no controller. No
-  reviewer decision, no review queue, no status transition, and no write to `submission_status_history`
-  or `audit_events` — neither table exists.
 - **No audit trail.** ADR-005 requires sign-in attempts, including failures, to be recorded. This
-  is the one Milestone 2 entry criterion still unmet; `docs/architecture/security.md` §12 records
-  why, and the unresolved question about where such a package would live.
-- **No download endpoint.** The detail page shows metadata and a checksum, not the file.
+  is the one Milestone 2 entry criterion still unmet, and the one Milestone 4 entry criterion still
+  unmet; `docs/architecture/security.md` §12 records why, and `application-structure.md` §5 records
+  the unresolved question about where such a package would live. `audit_events` does not exist.
+  Note the distinction: `submission_status_history` now records *workflow* transitions, which is a
+  different concern from *security* events.
+- **No resubmission.** A rejection is terminal in the MVP. Rejected work is not resubmitted, and
+  nothing resets a submission to `SUBMITTED`.
 - **No `Dockerfile`, no `Jenkinsfile`, no Ansible playbooks, no pipeline stages.** The real
   deliverable of this project — the pipeline — is still ahead.
-- **No admin UI.** `ADMIN` exists as a role and gates `/admin/**`; no management screens ship.
+- **No admin UI.** `ADMIN` exists as a role, gates `/admin/**`, and can review; no management
+  screens ship.
 
 **Do not add placeholder Java classes merely to fill directories.** Empty structure with no
 behaviour is worse than no structure: it implies work that has not happened. Create a class
@@ -374,42 +398,54 @@ Rules for that response:
 
 ## 13. Next milestone readiness
 
-**Milestone 4 — the reviewer decision.** A student can now submit work and see it. Nobody can
-review it: `review/` is empty, `/review/**` is guarded by the filter chain but has no controller,
-and a submission can only ever reach `SUBMITTED`. This milestone closes the loop that
-[`docs/requirements/mvp.md`](docs/requirements/mvp.md) describes.
+**Milestone 4 is code-complete and unproven.** Everything below is written; nothing below has been
+executed. A `[x]` here means *implemented*, never *verified* — the one criterion that would turn
+the first into the second is the last one, and it is open.
 
-Entry criteria:
-
-- [ ] A `ReviewService` in `review/` recording one terminal decision — `APPROVED` or `REJECTED` —
+- [x] A `ReviewService` in `review/` recording one terminal decision — `APPROVED` or `REJECTED` —
       with a required comment (FR-18, FR-19), reachable only by a `REVIEWER` or an `ADMIN`.
-- [ ] A review queue of submissions in `SUBMITTED`, and a reviewer's view of an artefact
-      (FR-16, FR-17). Reaching submission data goes through `SubmissionService`; `review` may not
-      import `SubmissionRepository` or mutate a `Submission` directly
+- [x] A review queue of submissions in `SUBMITTED` (`GET /review`), and a reviewer's view of an
+      artefact (FR-16, FR-17). Reaching submission data goes through `SubmissionService`; `review`
+      imports no `SubmissionRepository` and mutates no `Submission` directly
       ([`application-structure.md` §4](docs/architecture/application-structure.md)).
-- [ ] The **terminality rule** enforced in the service, not the view: a decision is final and a
-      decided submission cannot be decided again (FR-20). Rejected work is **not** resubmitted —
-      that is explicitly out of MVP scope.
-- [ ] `reviewed_at` and `reviewer_id` written in the same statement as the status, so
-      `ck_submissions_decision` can never fire. It exists to catch a bug; the service must not be
-      the source of one.
-- [ ] `SubmissionStatusHistory` — entity, table, and one append-only row per transition, carrying
-      previous status, new status, actor, timestamp and comment (FR-15, FR-21). **Neither the
-      table nor the entity exists yet**, so FR-15 is currently unmet: an upload records its
-      `SUBMITTED` status on the submission row but writes no history.
+- [x] The **terminality rule** enforced on the entity and re-asserted by the service, not in the
+      view: a decision is final and a decided submission cannot be decided again (FR-20). Rejected
+      work is **not** resubmitted — that is explicitly out of MVP scope.
+- [x] `reviewed_at` and `reviewer_id` written in the same statement as the status, so
+      `ck_submissions_decision` can never fire. It exists to catch a bug; the entity is written so
+      it cannot be the source of one.
+- [x] `SubmissionStatusHistory` — entity, table (`V3__submission_status_history.sql`), and one
+      append-only row per transition, carrying previous status, new status, actor, timestamp and
+      note (FR-15, FR-21). `SubmissionService.submit` writes the creation row and
+      `recordDecision` writes the decision row, each in the same transaction as the status it
+      describes.
+- [x] Optimistic locking on `Submission.version`, so two reviewers deciding at once cannot silently
+      overwrite one another; the loser is told their decision was not recorded.
+- [x] File download for the owner (FR-13) and the reviewer (FR-17), served as an attachment with a
+      fixed content type and `nosniff` (`CLAUDE.md` §7 rule 10).
+- [x] The student sees the decision and the reviewer's reason on their own submission, together
+      with a chronological history — and still cannot see anyone else's (FR-14).
+- [x] Tests written for the whole workflow: approve, reject, a missing reason, an invalid
+      transition, a second decision, a concurrent conflict, history creation, reviewer
+      authorisation, a student refused at every review route, and a student confined to their own
+      data. **Written, not run.**
 - [ ] **The audit trail, still outstanding from Milestone 2** (FR-24). ADR-005 requires sign-in
       attempts — **including failures** — to be recorded. No `audit_events` table and no
       `AuditService` exist, and the package that would own one is an open question recorded in
       [`application-structure.md` §5](docs/architecture/application-structure.md).
-- [ ] The student sees the decision and the reviewer's comment on their own submission — and still
-      cannot see anyone else's (FR-14).
-- [ ] Integration tests proving: a `STUDENT` is refused at `/review/**`; an anonymous visitor is
-      redirected; a decision with no comment is refused; a second decision on a decided submission
-      is refused; a student cannot read another student's submission through any review route.
-- [ ] `./mvnw clean verify` green, and the run recorded under
-      [`docs/evidence/`](docs/evidence/), which currently holds no captured output for any
-      milestone.
+- [ ] **`./mvnw clean verify` green, and the run recorded under
+      [`docs/evidence/`](docs/evidence/).** This is the criterion that matters most and the only
+      one still open. `docs/evidence/` holds no captured output for any milestone, and
+      [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md) records the same gap.
 
-Nothing in Milestone 4 may be merged with a hard-coded secret. The version numbers recorded in
+Nothing decided so far may be merged with a hard-coded secret. The version numbers recorded in
 [`docs/operations/toolchain.md`](docs/operations/toolchain.md) must be updated with the
-versions actually used.
+versions actually used — which cannot happen until a build runs.
+
+**Milestone 5 — the delivery pipeline.** The application is now as complete as the MVP needs it to
+be; the deliverable this project actually exists to demonstrate is still absent. Milestone 5
+carries: a multi-stage `Dockerfile`; `Jenkinsfile` stages for build, unit, integration and Selenium
+E2E tests, image publication to a registry, Ansible provisioning and deployment, a health check,
+and a rollback path; the Selenium suite itself; and — if it is to be claimed — the FR-24 audit
+trail carried over above. Nothing here should be started before the Milestone 4 build is green,
+because a pipeline that has never seen a passing build has nothing to demonstrate.

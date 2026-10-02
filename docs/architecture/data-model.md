@@ -1,16 +1,17 @@
 # Data Model
 
-**Status:** Partially implemented — Milestone 3 (`users` and `submissions` migrated and mapped;
-`submission_status_history` and `audit_events` still planned)
+**Status:** Partially implemented — Milestone 4 (`users`, `submissions`, and
+`submission_status_history` migrated and mapped; `audit_events` still planned)
 **Related:** [System overview](system-overview.md) · [Security architecture](security.md) ·
 [Application structure](application-structure.md) ·
 [ADR-003](../adr/ADR-003-mysql-system-of-record.md) ·
 [ADR-004](../adr/ADR-004-filesystem-volume-and-db-metadata.md) · [MVP requirements](../requirements/mvp.md)
 
-This is the persistence model. Column names are shown as they appear in MySQL. **§2 and §3 are
-implemented** — `V1__baseline.sql` and `V2__submissions.sql` create them, and `auth/User.java` and
-`submission/Submission.java` map them. **§4 and §5 are still planned**: those tables do not exist
-yet, and each is the contract the migration implementing it must satisfy.
+This is the persistence model. Column names are shown as they appear in MySQL. **§2, §3, and §4 are
+implemented** — `V1__baseline.sql`, `V2__submissions.sql`, and `V3__submission_status_history.sql`
+create them, and the entities under `auth/` and `submission/` map them. **§5 is still planned**: that
+table does not exist yet, and the section is the contract the migration implementing it must
+satisfy.
 
 > **Amended 2026-10-01 (identity).** §2 originally specified a `BIGINT` surrogate key with
 > `username` and `display_name` columns. It now specifies a `UUID` identifier and an `email` login
@@ -23,19 +24,27 @@ yet, and each is the contract the migration implementing it must satisfy.
 > `reviewed_at` / `reviewer_id`. The differences and their reasons are recorded in §3 under
 > "Deviations from the original specification". This table was never applied before it was written,
 > so the same reasoning as §2 applies.
+>
+> **Amended 2026-10-02 (status history).** §4 originally specified a `BIGINT` auto-increment `id` and
+> the column names `previous_status` / `new_status` / `comment` / `occurred_at`. The implemented table
+> uses a `UUID` identifier assigned by the application and the names `from_status` / `to_status` /
+> `note` / `created_at`. The reasons are recorded in §4 under "Deviations from the original
+> specification". Unlike the two amendments above, `V3` is a **new** migration for a table that never
+> existed — nothing already applied was edited.
 
 ---
 
 ## 1. Overview
 
-Four entities in the MVP. The design is deliberately small: a user owns submissions, and every
-status change to a submission appends to a history table.
+Four entities in the MVP. The design is deliberately small: a user owns submissions, a reviewer
+decides them, and every status change to a submission appends to a history table.
 
-Solid relationships are implemented; dashed ones are planned.
+Solid relationships are implemented; the dashed one is planned.
 
 ```mermaid
 erDiagram
     USERS ||--o{ SUBMISSIONS : "submits"
+    USERS ||--o{ SUBMISSIONS : "decides (reviewer)"
     USERS ||--o{ SUBMISSION_STATUS_HISTORY : "acts as actor"
     SUBMISSIONS ||--o{ SUBMISSION_STATUS_HISTORY : "has transitions"
     USERS ||--o{ AUDIT_EVENTS : "acts as actor"
@@ -70,13 +79,13 @@ erDiagram
     }
 
     SUBMISSION_STATUS_HISTORY {
-        bigint id PK
+        varchar(36) id PK
         varchar(36) submission_id FK
-        varchar(16) previous_status
-        varchar(16) new_status
+        varchar(16) from_status
+        varchar(16) to_status
         varchar(36) actor_id FK
-        varchar(2000) comment
-        datetime(6) occurred_at
+        varchar(2000) note
+        datetime(6) created_at
     }
 
     AUDIT_EVENTS {
@@ -92,8 +101,9 @@ erDiagram
 ```
 
 Every foreign key that points at `users(id)` must be `VARCHAR(36)` to match, because MySQL
-requires the referenced and referencing columns to have the same type. `USERS` and `SUBMISSIONS`
-exist; the remaining two are the corrected contract for the migrations that will create them.
+requires the referenced and referencing columns to have the same type. `USERS`, `SUBMISSIONS`, and
+`SUBMISSION_STATUS_HISTORY` exist; `AUDIT_EVENTS` is the corrected contract for the migration that
+will create it.
 
 `AUDIT_EVENTS` is required by FR-24 but is not one of the three named entities in the milestone
 brief; it is listed here so the migration that introduces the audit trail can create it in the same
@@ -164,9 +174,9 @@ One row per uploaded artefact. Contains **metadata only** — the file bytes liv
 | `status` | `VARCHAR(16)` | NOT NULL | `SUBMITTED` \| `APPROVED` \| `REJECTED` |
 | `created_at` | `DATETIME(6)` | NOT NULL | UTC. Set on insert |
 | `updated_at` | `DATETIME(6)` | NOT NULL | UTC. Bumped by the optimistic lock and by a review decision |
-| `reviewed_at` | `DATETIME(6)` | NULL | Set exactly once, with the decision. **Unused until the review feature** |
-| `reviewer_id` | `VARCHAR(36)` | NULL, FK → `users(id)`, `ON DELETE RESTRICT` | The reviewer who decided. **Unused until the review feature** |
-| `rejection_reason` | `VARCHAR(2000)` | NULL | Non-null only when the status is `REJECTED`. **Unused until the review feature** |
+| `reviewed_at` | `DATETIME(6)` | NULL | Set with the decision. Written by `Submission.approve`/`reject`, never on its own |
+| `reviewer_id` | `VARCHAR(36)` | NULL, FK → `users(id)`, `ON DELETE RESTRICT` | The reviewer who decided. Written with the status and the time, so `ck_submissions_decision` cannot fire |
+| `rejection_reason` | `VARCHAR(2000)` | NULL | Non-null only when the status is `REJECTED` |
 | `version` | `BIGINT` | NOT NULL, default `0` | JPA optimistic lock |
 
 **Indexes:**
@@ -186,7 +196,7 @@ One row per uploaded artefact. Contains **metadata only** — the file bytes liv
 | --- | --- | --- |
 | `status` is one of the three known values | `ck_submissions_status` — `CHECK (status IN ('SUBMITTED','APPROVED','REJECTED'))` | The `SubmissionStatus` enum, and the entity, which has no method that sets any other value |
 | `0 < file_size_bytes ≤ 10 MB` | `ck_submissions_file_size` | `FileValidationService`, `spring.servlet.multipart.max-file-size`, and the servlet container |
-| A row is either undecided with no reviewer and no time, or decided with both | `ck_submissions_decision` | Nothing yet — the review feature owns the transition |
+| A row is either undecided with no reviewer and no time, or decided with both | `ck_submissions_decision` | `Submission.approve`/`reject`, which set the status, the time, and the reviewer together — see below |
 | Two rows never share a stored file name | `uq_submissions_stored_file_name` | `StorageIdentifier.generate()`, which returns a fresh UUID per upload |
 | A submission always has a real owner | `fk_submissions_student_id` | `SubmissionService.submit`, which takes the owner from the authenticated principal |
 
@@ -216,12 +226,15 @@ exercised is one typo away from being a comment.
   length. It supports integrity verification and future duplicate detection.
 - `content_type` is stored even though it is always `application/pdf` in the MVP, so that lifting
   the single-format restriction is a validation change rather than a migration.
-- `reviewed_at` / `reviewer_id` are denormalised from the history table, to come, because the
-  reviewer's list needs them on every row and joining an append-only log to render a queue is
-  wasteful.
-- The three decision columns are created now and written by nothing. The entity that describes a
-  submission is being designed now, and splitting one table's description across two migrations
-  would be the more confusing choice.
+- `reviewed_at` / `reviewer_id` are denormalised from the history table and are written together
+  with the status by `Submission.approve`/`reject`. They exist on this row because the reviewer's
+  queue needs them on every row, and joining an append-only log to render a list is wasteful. They
+  are set in one method, with the status, because `ck_submissions_decision` requires the three to
+  agree — a method that set the status and left either null would be refused by the database, and
+  the constraint exists to catch a bug, not to be the source of one.
+- The decision columns are the reason `recordDecision` takes an outcome and re-reads the row inside
+  its own transaction. The status change, the reviewer, the time, and the history row are five
+  writes that must all happen or none of them, so they are one transaction and one method.
 
 **Deviations from the original specification:**
 
@@ -235,38 +248,72 @@ exercised is one typo away from being a comment.
 
 ## 4. `submission_status_history`
 
-**Planned — not created by any migration yet.** Nothing writes it until the review feature exists,
-and it is the reviewer's decision that makes an append-only log meaningful. Creating it now would be
-schema written ahead of the code that justifies it, which is the reasoning `V1` followed when it
-stopped at `users`.
+**Implemented** by `V3__submission_status_history.sql`, mapped by
+`submission/SubmissionStatusHistory.java`. Written by `SubmissionService.submit` (the creation entry)
+and `SubmissionService.recordDecision` (each decision), both inside the transaction that changes the
+submission row.
 
 An **append-only** log of every status transition. This table is the audit of record for the
-workflow (FR-21).
+workflow (FR-15, FR-21).
 
 | Column | Type | Constraints | Notes |
 | --- | --- | --- | --- |
-| `id` | `BIGINT` | PK, auto-increment | Surrogate key |
-| `submission_id` | `VARCHAR(36)` | NOT NULL, FK → `submissions(id)` | Restricted delete |
-| `previous_status` | `VARCHAR(16)` | NULL | NULL for the initial creation entry |
-| `new_status` | `VARCHAR(16)` | NOT NULL | The status after the transition |
-| `actor_id` | `VARCHAR(36)` | NOT NULL, FK → `users(id)` | Who caused the transition |
-| `comment` | `VARCHAR(2000)` | NULL | Required by the service when the transition is a decision |
-| `occurred_at` | `DATETIME(6)` | NOT NULL | UTC |
+| `id` | `VARCHAR(36)` | PK | Application-assigned UUID, like every other identifier here |
+| `submission_id` | `VARCHAR(36)` | NOT NULL, FK → `submissions(id)`, `ON DELETE RESTRICT` | The transition belongs to one submission |
+| `from_status` | `VARCHAR(16)` | NULL | NULL for the initial creation entry, which is what marks the start of the lifecycle |
+| `to_status` | `VARCHAR(16)` | NOT NULL | The status after the transition |
+| `actor_id` | `VARCHAR(36)` | NOT NULL, FK → `users(id)`, `ON DELETE RESTRICT` | Who caused the transition: the student for creation, the reviewer for a decision |
+| `note` | `VARCHAR(2000)` | NULL | The reviewer's comment. Required by the service when the transition is a rejection |
+| `created_at` | `DATETIME(6)` | NOT NULL | UTC |
 
-**Indexes:** index on `(submission_id, occurred_at)`.
+**Indexes:** `idx_submission_status_history_submission_id_created_at` on `(submission_id,
+created_at)` — the only read this table has is one submission's history, oldest first, and the index
+answers both the filter and the sort.
+
+**Constraints and invariants:**
+
+| Invariant | Constraint | Also enforced by |
+| --- | --- | --- |
+| Both statuses are drawn from the lifecycle vocabulary | `ck_submission_status_history_from_status`, `ck_submission_status_history_to_status` | `SubmissionStatus`; the entity exposes only the enum |
+| A transition is always attributable | `actor_id` `NOT NULL` | The service passes the authenticated principal's identifier |
+| A transition belongs to a real submission | `fk_submission_status_history_submission_id` | The service writes the row after the submission row exists, in the same transaction |
+| The actor is a real user | `fk_submission_status_history_actor_id` | The identifier comes from the authenticated principal, never from a request |
+
+`ApplicationContextIT` asserts each of these by inserting rows the entity could never produce — a
+status outside the vocabulary, an unknown actor, an orphaned submission.
 
 **Decisions:**
 
-- Rows are never updated or deleted. If the application ever needs a correction, it appends a
-  compensating entry — that is what makes the table trustworthy.
-- The creation row has `previous_status = NULL` and `new_status = 'SUBMITTED'`, so a submission's
-  full lifecycle is readable from this table alone.
-- `comment` is `NULL`-able at the database level but **required by the service** for any transition
-  out of `SUBMITTED` (FR-19). The database permits a null so the creation row can exist; the rule
-  lives where it is meaningful.
-- The creation row is **not** written by the current milestone, even though `submissions` rows are.
-  A history table with exactly one entry per submission and no transitions is a table whose shape
-  has not been tested by the thing that will use it.
+- Rows are never updated or deleted — there is no setter and no `@PreUpdate`. If the application ever
+  needs a correction, it appends a compensating entry; that is what makes the table trustworthy as an
+  audit record.
+- The creation row has `from_status = NULL` and `to_status = 'SUBMITTED'`, so a submission's full
+  lifecycle is readable from this table alone. A null `from_status` is meaningful rather than
+  missing, which is why the template labels the first entry from the absence of a previous status
+  rather than from its position in the list.
+- `note` is `NULL`-able at the database level but **required by the service** for a rejection
+  (FR-19). The database permits a null so the creation row and an approval can exist; the rule lives
+  in `ReviewService`, where it can produce a sentence a reviewer can act on, and again in the
+  `Submission` entity.
+- The row is written **in the same transaction as the status change**, so the status and the history
+  cannot disagree: either both are committed or neither is. A history that could be written
+  separately is a history that can drift.
+- `actor_id` is **not** carried into the read model a student sees
+  (`submission/SubmissionHistoryEntry`). The student is told what happened and when, not who decided
+  it; the audit row still records the actor for FR-22.
+
+**Deviations from the original specification:**
+
+| Was specified | Is implemented | Why |
+| --- | --- | --- |
+| `id` as `BIGINT` auto-increment | `VARCHAR(36)` application-assigned UUID | Every other identifier in the schema is an application-assigned UUID, and the application sets it before the insert. An auto-increment here would be the one table whose key the database chose |
+| `previous_status` / `new_status` | `from_status` / `to_status` | The same pair of facts. `from`/`to` reads as the two ends of one transition and pairs naturally with the transition factories (`SubmissionStatusHistory.transition(from, to, …)`) |
+| `comment` | `note` | `comment` suggests a discussion thread, which `mvp.md` §3 excludes; `note` is the reviewer's remark attached to a decision |
+| `occurred_at` | `created_at` | `users` and `submissions` both use `created_at`/`updated_at`; one vocabulary for timestamps across the schema is worth more than a more evocative name on one table |
+
+**What this table is not.** It records *workflow* transitions. Security events — sign-in success and
+failure above all — belong in `audit_events` (§5), which still does not exist. FR-24 remains unmet;
+see [security.md §12](security.md#12-what-this-milestone-does-not-do).
 
 ## 5. `audit_events`
 
@@ -308,7 +355,12 @@ submissions.stored_file_name  →  a file directly inside the configured storage
 - The root comes from `UPLOAD_STORAGE_PATH`, bound to `app.storage.root` and read by
   `storage.StorageProperties`, so the same artefact works in every environment.
 - The volume is persistent and survives container replacement (NFR-5). It is **not** servable:
-  nothing maps it to a URL, and no static-resource handler points at it.
+  nothing maps it to a URL, and no static-resource handler points at it. Files are read by two
+  controllers — `GET /submissions/{id}/file` for the owner (FR-13) and
+  `GET /review/submissions/{id}/file` for a reviewer (FR-17) — each of which resolves the submission
+  through a query that carries the caller's identity, then hands the bytes out as an
+  `attachment` with a fixed content type and `nosniff` (`CLAUDE.md` §7 rule 10). Neither route ever
+  reveals `stored_file_name`.
 - Writes go to a temporary file in the same directory and are then moved into place atomically, so
   a crash mid-write leaves either nothing or the complete artefact — never a truncated file that a
   later reader would checksum and find wanting.
@@ -337,8 +389,10 @@ orphaned. Reconciling the volume against the table is a sweeper, and it is not i
   `src/main/resources/db/migration` (FR-27).
 - Hibernate runs with `ddl-auto=validate`. It never creates or alters schema; a mismatch between an
   entity and the migrated schema fails startup rather than mutating the database.
-- The migrations are `V1__baseline.sql` (the `users` table) and `V2__submissions.sql` (the
-  `submissions` table). Each creates one table and the constraints and indexes that belong to it.
+- The migrations are `V1__baseline.sql` (the `users` table), `V2__submissions.sql` (the `submissions`
+  table), and `V3__submission_status_history.sql` (the `submission_status_history` table). Each
+  creates one table and the constraints and indexes that belong to it. `V3` is a **new** file for a
+  table that never existed; neither `V1` nor `V2` was touched by it.
 - Migrations are **forward-only**. A released migration is never edited; a correction is a new
   migration. `V1` was amended in place while the authentication milestone was in progress, which
   §2 records: it had never been applied in any environment, because Flyway's autoconfiguration was
