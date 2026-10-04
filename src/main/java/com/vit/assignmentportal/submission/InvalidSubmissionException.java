@@ -1,5 +1,7 @@
 package com.vit.assignmentportal.submission;
 
+import com.vit.assignmentportal.common.PortalException;
+
 /**
  * The student's upload was refused before anything was stored.
  *
@@ -7,7 +9,8 @@ package com.vit.assignmentportal.submission;
  * is <strong>safe to render verbatim</strong>: it is composed by this application, it never
  * includes text supplied by the client, and it never describes a filesystem path, a SQL
  * statement, or a configuration value ({@code CLAUDE.md} §7 rule 11). Every message the class is
- * thrown with is a complete, actionable sentence.
+ * thrown with is a complete, actionable sentence. Inheriting {@link PortalException} is how that
+ * contract is declared rather than merely asserted in prose.
  *
  * <p>Named for what happened — the submission was not valid — rather than
  * {@code SubmissionRejectedException}, which would collide with {@link
@@ -20,7 +23,7 @@ package com.vit.assignmentportal.submission;
  * anyway. A service that guarantees "nothing is stored when validation fails" should not offer a
  * code path that quietly breaks that guarantee.
  */
-public class InvalidSubmissionException extends RuntimeException {
+public class InvalidSubmissionException extends PortalException {
 
     /**
      * The form field the refusal concerns — {@code title}, {@code courseCode} or {@code file} —

@@ -134,6 +134,13 @@ class SubmissionAccessIT extends MySqlIntegrationTest {
 
     /**
      * A student cannot open another student's submission — and is told nothing about it.
+     *
+     * <p>The refusal renders the shared error page rather than an empty response with a 404 status.
+     * That is a change worth pinning: the status used to come from a {@code @ResponseStatus} on the
+     * exception, which resolved to no view at all and left the body empty. A refusal that reaches a
+     * controller and escapes it is now answered by {@code PortalExceptionHandler}, and a reader who
+     * mistyped or lost an address should get the same page they would get from the container's own
+     * 404.
      */
     @Test
     void refusesToShowOneStudentASubmissionBelongingToAnother() throws Exception {
@@ -142,10 +149,44 @@ class SubmissionAccessIT extends MySqlIntegrationTest {
 
         mockMvc.perform(get("/submissions/" + first.submissionId()).session(second.session()))
                 .andExpect(status().isNotFound())
+                .andExpect(view().name("error"))
                 .andExpect(content().string(not(containsString("First student's essay"))));
 
         mockMvc.perform(get("/submissions/" + second.submissionId()).session(first.session()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(view().name("error"));
+    }
+
+    /**
+     * The refusal explains nothing beyond the fact that the page is not there.
+     *
+     * <p>The status and the view are asserted by the test above; this asserts what is <em>in</em> the
+     * body, because that is where an information leak would be and it is the one failure mode that
+     * would not look like a failure at all. The identifier the caller asked for is deliberately
+     * absent: echoing it back would confirm nothing to the caller that they did not already send,
+     * while a body naming the exception or the package it lives in would hand an anonymous reader a
+     * map of the machinery ({@code CLAUDE.md} §7 rule 11).
+     */
+    @Test
+    void explainsARefusedSubmissionWithoutExposingInternals() throws Exception {
+        SignedIn owner = signedInWithSubmission("escaped-404-owner", "First student's essay");
+        SignedIn other = signedInWithSubmission("escaped-404-other", "Second student's essay");
+
+        String body = mockMvc.perform(
+                        get("/submissions/" + owner.submissionId()).session(other.session()))
+                .andExpect(status().isNotFound())
+                .andExpect(view().name("error"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(body)
+                .contains("Error 404")
+                .doesNotContain(owner.submissionId().toString())
+                .doesNotContain("SubmissionNotFoundException")
+                .doesNotContain("PortalException")
+                .doesNotContain("com.vit.assignmentportal")
+                .doesNotContain("java.");
     }
 
     /**
@@ -177,7 +218,8 @@ class SubmissionAccessIT extends MySqlIntegrationTest {
         SignedIn student = signedInWithSubmission("missing-id", "Something");
 
         mockMvc.perform(get("/submissions/" + UUID.randomUUID()).session(student.session()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(view().name("error"));
     }
 
     /**
@@ -289,7 +331,8 @@ class SubmissionAccessIT extends MySqlIntegrationTest {
 
         mockMvc.perform(get("/submissions/" + owner.submissionId() + "/file")
                         .session(other.session()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(view().name("error"));
     }
 
     // ------------------------------------------------------------------------

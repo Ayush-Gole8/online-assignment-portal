@@ -91,6 +91,17 @@ The application is server-rendered and must work without JavaScript (NFR-2).
 | Safari | Best effort | Not covered by automated tests |
 | Internet Explorer | No | Not supported |
 
+### Vendored front-end assets
+
+The UI links no CDN — a build agent with no route to the public internet must render the same pages
+([CLAUDE.md §1](../../CLAUDE.md), enforced by `UiRenderingIT.linksTheVendoredStylesheets`). The
+stylesheets are therefore committed under `src/main/resources/static/css/` and served from `/css/**`.
+
+| Asset | Version | Source | Licence | Notes |
+| --- | --- | --- | --- | --- |
+| Bootstrap CSS | **5.3.3** | `cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css`, vendored on 2026-10-02 | MIT (header retained in the file) | CSS only — no bundle, no Popper, no JavaScript (NFR-2). The templates use 5.3 utilities (`text-body-secondary`), so the major.minor is load-bearing. `UiRenderingIT.servesTheLinkedStylesheetsAsCss` asserts it is served as `text/css`, which is what was missing while the file was absent |
+| `portal.css` | — | this repository | — | This application's own overrides, loaded after Bootstrap |
+
 ## 8. Recording results
 
 The build now exists, so dependency versions can be captured mechanically rather than by
@@ -168,7 +179,8 @@ visitor is most likely to reach.
 
 Fixed by writing every comment that can reach a browser as a Thymeleaf **parser-level** comment,
 which the parser discards before rendering: 51 comments across 18 of the 19 template files.
-(`fragments/portal-header.html`, which nothing references, was left alone.) The assertion itself
+(`fragments/portal-header.html`, which nothing references, was the nineteenth; it has since been
+deleted.) The assertion itself
 was left exactly as it was. It now passes because nothing reaches the browser, which is the right
 reason and the opposite of weakening the test to fit the output.
 

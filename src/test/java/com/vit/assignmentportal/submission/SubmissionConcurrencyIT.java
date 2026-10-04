@@ -10,6 +10,8 @@ import com.vit.assignmentportal.auth.UserService;
 import com.vit.assignmentportal.common.Role;
 import com.vit.assignmentportal.common.SubmissionStatus;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -91,6 +93,18 @@ class SubmissionConcurrencyIT extends MySqlIntegrationTest {
     private JdbcTemplate jdbcTemplate;
 
     /**
+     * The application's own time source.
+     *
+     * <p>The decision instant is read from it once, below, rather than taken twice from
+     * {@code Instant.now()}. The two threads must be applying <em>the same</em> decision time for this
+     * to be a test about the optimistic lock: two different wall-clock reads would leave the
+     * assertion on {@code reviewed_at} — or its absence — depending on which thread happened to be
+     * scheduled first, which is the one thing a race test must not do.
+     */
+    @Autowired
+    private Clock clock;
+
+    /**
      * The loser's decision is refused, the winner's stands, no rejection reason is written, and the
      * audit trail is untouched.
      *
@@ -107,6 +121,10 @@ class SubmissionConcurrencyIT extends MySqlIntegrationTest {
 
         Submission created = submissionService.submit(student, pdf(), "Concurrent work", "CS101");
         UUID submissionId = created.getId();
+
+        // One decision time for both reviewers, read from the application's clock. See the field's
+        // javadoc: a race test must not let the scheduler decide what the timestamps are.
+        Instant decidedAt = clock.instant();
 
         CountDownLatch aHasReadAtVersionZero = new CountDownLatch(1);
         CountDownLatch bHasCommitted = new CountDownLatch(1);
@@ -127,7 +145,7 @@ class SubmissionConcurrencyIT extends MySqlIntegrationTest {
 
                     await(bHasCommitted);
 
-                    stale.approve(reviewerA.id());
+                    stale.approve(reviewerA.id(), decidedAt);
                     return null;
                 });
             });
@@ -136,7 +154,7 @@ class SubmissionConcurrencyIT extends MySqlIntegrationTest {
             await(aHasReadAtVersionZero);
             inTransaction(() -> {
                 Submission fresh = submissionRepository.findById(submissionId).orElseThrow();
-                fresh.approve(reviewerB.id());
+                fresh.approve(reviewerB.id(), decidedAt);
                 return null;
             });
             bHasCommitted.countDown();

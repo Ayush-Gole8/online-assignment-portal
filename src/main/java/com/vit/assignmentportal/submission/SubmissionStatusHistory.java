@@ -106,6 +106,14 @@ public class SubmissionStatusHistory {
     @Column(name = "note", length = 2000)
     private String note;
 
+    /**
+     * When the transition happened, from the application's {@code Clock}.
+     *
+     * <p>Supplied by the caller rather than read here, so that a decision writes one instant across
+     * the history row and the submission row it belongs to. It is also what orders the timeline
+     * ({@code findBySubmissionIdOrderByCreatedAtAsc}) and what the student's page shows as when
+     * each transition occurred (FR-21).
+     */
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -114,12 +122,14 @@ public class SubmissionStatusHistory {
     }
 
     private SubmissionStatusHistory(UUID submissionId, SubmissionStatus fromStatus,
-                                    SubmissionStatus toStatus, UUID actorId, String note) {
+                                    SubmissionStatus toStatus, UUID actorId, String note,
+                                    Instant createdAt) {
         this.submissionId = submissionId;
         this.fromStatus = fromStatus;
         this.toStatus = toStatus;
         this.actorId = actorId;
         this.note = note;
+        this.createdAt = createdAt;
     }
 
     /**
@@ -131,10 +141,15 @@ public class SubmissionStatusHistory {
      *
      * @param submissionId the submission that was created
      * @param actorId      the student who submitted it
+     * @param createdAt    the instant of the submission, from the application's {@code Clock}. The
+     *                     caller passes the same value it gave the {@link Submission} row, so the
+     *                     timeline starts at the moment the submission says it did
      */
-    public static SubmissionStatusHistory creation(UUID submissionId, UUID actorId) {
+    public static SubmissionStatusHistory creation(UUID submissionId, UUID actorId,
+                                                    Instant createdAt) {
+        Objects.requireNonNull(createdAt, "createdAt");
         return new SubmissionStatusHistory(submissionId, null, SubmissionStatus.SUBMITTED, actorId,
-                null);
+                null, createdAt);
     }
 
     /**
@@ -145,20 +160,31 @@ public class SubmissionStatusHistory {
      * @param fromStatus   the status before the decision — {@code SUBMITTED} in the MVP
      * @param toStatus     the status after — {@code APPROVED} or {@code REJECTED}
      * @param note         the reviewer's comment: required for a rejection, {@code null} otherwise
+     * @param createdAt    the instant of the decision, from the application's {@code Clock}, and
+     *                     the same value the {@link Submission} row records as its
+     *                     {@code reviewedAt}
      */
     public static SubmissionStatusHistory transition(UUID submissionId, UUID actorId,
                                                      SubmissionStatus fromStatus,
-                                                     SubmissionStatus toStatus, String note) {
-        return new SubmissionStatusHistory(submissionId, fromStatus, toStatus, actorId, note);
+                                                     SubmissionStatus toStatus, String note,
+                                                     Instant createdAt) {
+        Objects.requireNonNull(createdAt, "createdAt");
+        return new SubmissionStatusHistory(submissionId, fromStatus, toStatus, actorId, note,
+                createdAt);
     }
 
-    /** Assigns the identifier and the timestamp on the way into the database. */
+    /**
+     * Assigns the identifier on the way into the database.
+     *
+     * <p>Only the identifier. The timestamp is supplied by the caller so that this row and the
+     * submission row it describes carry one instant rather than two taken a moment apart — see
+     * {@link #creation} and {@link #transition}.
+     */
     @PrePersist
     void onInsert() {
         if (id == null) {
             id = UUID.randomUUID();
         }
-        this.createdAt = Instant.now();
     }
 
     public UUID getId() {

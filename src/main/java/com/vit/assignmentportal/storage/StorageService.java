@@ -28,7 +28,8 @@ import org.springframework.stereotype.Service;
  * transaction relies on.</strong> They are the two halves of an operation that spans a file system
  * and a database, and neither can be made atomic with the other. {@code SubmissionService} is
  * where that gap is closed; read it before changing the contract here. {@link #load} is outside
- * that concern — it only reads.
+ * that concern — it only reads — and so is {@link #verifyWritable()}, which answers a question
+ * about the volume and leaves nothing behind to answer it.
  */
 @Service
 public class StorageService {
@@ -42,6 +43,16 @@ public class StorageService {
      */
     private static final String PARTIAL_FILE_PREFIX = "upload-";
     private static final String PARTIAL_FILE_SUFFIX = ".part";
+
+    /**
+     * The prefix and suffix of the file {@link #verifyWritable()} creates and removes.
+     *
+     * <p>Deliberately distinguishable from {@link #PARTIAL_FILE_PREFIX}: an operator who finds one
+     * of these left behind after a crash is looking at an interrupted health probe, not at an
+     * interrupted upload, and the two call for different responses.
+     */
+    private static final String PROBE_FILE_PREFIX = "health-probe-";
+    private static final String PROBE_FILE_SUFFIX = ".tmp";
 
     private final Path root;
 
@@ -154,6 +165,60 @@ public class StorageService {
             Files.deleteIfExists(resolve(identifier));
         } catch (IOException cause) {
             throw new StorageException("The stored file could not be removed.", cause);
+        }
+    }
+
+    /**
+     * Proves the configured volume can be written to, by writing to it.
+     *
+     * <p>This exists for the operational health check ({@link StorageHealthIndicator}). Everything
+     * this application does that a user cares about depends on this directory accepting bytes: an
+     * upload cannot be stored without it, and a submission whose bytes were not stored cannot be
+     * committed either. A deployment whose volume has been unmounted, remounted read-only, filled,
+     * or re-permissioned is a deployment that accepts requests and fails every one that matters — so
+     * the health endpoint should say so, and the pipeline's health-check stage should be able to see
+     * it.
+     *
+     * <h2>Why it writes rather than asks</h2>
+     *
+     * <p>{@code Files.isWritable} answers from permission bits, and is wrong in both directions: a
+     * bind mount can be read-only while the directory's own permissions allow writing, and an ACL
+     * can deny a write the mode bits permit. The only test that cannot be wrong is carrying one out.
+     * One byte is written to a uniquely named file and the file is removed immediately, so the cost
+     * of a probe is a single create and a single unlink.
+     *
+     * <p>The directory is created if it is absent, matching {@link #store(byte[])}: on a fresh host
+     * the volume is mounted empty, and a probe that reported DOWN until the first upload had run
+     * would stop the container from ever becoming ready.
+     *
+     * <p>The probe file is removed on every path, including the failing one. A check that litters
+     * the volume each time it reports a problem is a check that makes the problem worse.
+     *
+     * @throws StorageException if the volume cannot be created or written to; the message names the
+     *                          root so an operator can act on it, and the caller publishes only the
+     *                          resulting status rather than the message
+     */
+    public void verifyWritable() {
+        Path probe = null;
+        try {
+            Files.createDirectories(root);
+            probe = Files.createTempFile(root, PROBE_FILE_PREFIX, PROBE_FILE_SUFFIX);
+            Files.write(probe, new byte[] {0});
+        } catch (IOException cause) {
+            throw new StorageException(
+                    "The storage volume at " + root + " could not be written to.", cause);
+        } finally {
+            if (probe != null) {
+                try {
+                    Files.deleteIfExists(probe);
+                } catch (IOException cleanupFailure) {
+                    // Logged rather than thrown. The write above is what the check is about and it
+                    // succeeded; failing the probe over a file that could not be tidied would take a
+                    // working deployment out of service over a stray temporary file.
+                    log.warn("Could not remove the health-probe file {}. It can be deleted by hand.",
+                            probe, cleanupFailure);
+                }
+            }
         }
     }
 

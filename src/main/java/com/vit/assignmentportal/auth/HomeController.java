@@ -1,7 +1,6 @@
 package com.vit.assignmentportal.auth;
 
 import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 
 /**
@@ -9,14 +8,18 @@ import org.springframework.web.bind.annotation.GetMapping;
  *
  * <p>It is small on purpose, but it is not a placeholder: it is the destination that makes the
  * login flow complete, and the first place the current-user abstraction is exercised end to end
- * — session, principal, service, view model, template. Without it, {@code defaultSuccessUrl("/")}
+ * — session, principal, service, view, template. Without it, {@code defaultSuccessUrl("/")}
  * would point at a route that does not exist, and a successful sign-in would end at an error
  * page.
  *
- * <p>The route is covered by {@code anyRequest().authenticated()}, so
- * {@code requireCurrentUser()} cannot fail here. It is still called rather than
- * {@code currentUser()} so that if the route rules are ever loosened, the page fails loudly
- * instead of rendering for nobody.
+ * <p>The page's {@code currentUser} model attribute is supplied by
+ * {@code config.CurrentUserModelAdvice}, along with every other page's, rather than being added
+ * here. The handler still resolves the principal strictly and discards it, which is deliberate: the
+ * advice reads the principal <em>optionally</em> so that it can also serve the sign-in page, and
+ * that would quietly turn this route's "there is always a user here" into an assumption nobody
+ * checks. Asking for the principal by the method that throws keeps the property this class has
+ * always had — if the route rules are ever loosened, the home page fails loudly rather than
+ * rendering for nobody.
  */
 @Controller
 public class HomeController {
@@ -30,14 +33,13 @@ public class HomeController {
     /**
      * Renders the signed-in user's home page.
      *
-     * <p>Only a {@link CurrentUserView} reaches the template — never the {@link User} entity. The
-     * conversion happens here, at the boundary, so a template cannot reach a field the view model
-     * does not expose.
+     * <p>The route is covered by {@code anyRequest().authenticated()}, so the assertion below cannot
+     * fail. Only a {@code CurrentUserView} reaches the template — never the {@code User} entity —
+     * and that conversion now happens once, in the advice.
      */
     @GetMapping("/")
-    public String home(Model model) {
-        AuthenticatedUser user = currentUserService.requireCurrentUser();
-        model.addAttribute("currentUser", CurrentUserView.from(user));
+    public String home() {
+        currentUserService.requireCurrentUser();
         return "auth/home";
     }
 }

@@ -16,18 +16,15 @@ import org.springframework.web.bind.annotation.RequestParam;
  * be called or would be a second, weaker authentication path beside the tested one
  * (ADR-005).
  *
- * <p>So this class renders pages; it never sees a credential. That is why nothing here depends
- * on {@code UserService} or on the password encoder: by the time a user lands on these pages the
- * authentication decision has already been made by the framework.
+ * <p>So this class renders pages, and it does nothing else: it holds no service, no repository, and
+ * no encoder. The signed-in user that both pages need for their layout is supplied by
+ * {@code config.CurrentUserModelAdvice}, which reads the principal <em>optionally</em> precisely so
+ * that it can serve a page a user reaches without one. By the time a user lands here the
+ * authentication decision has already been made by the framework, and the question of who they are
+ * is answered once, centrally, rather than by each page that wants to display a name.
  */
 @Controller
 public class AuthController {
-
-    private final CurrentUserService currentUserService;
-
-    public AuthController(CurrentUserService currentUserService) {
-        this.currentUserService = currentUserService;
-    }
 
     /**
      * The sign-in page.
@@ -71,16 +68,14 @@ public class AuthController {
      * <p>A forward, not a redirect: a redirect would replace the 403 with a 200 and would lose
      * the fact that access was refused, which is precisely the signal a browser test asserts on.
      *
-     * <p>The current user is put in the model so the page can be built on the signed-in layout —
-     * the reader <em>is</em> signed in, and offering them a "Sign in" button, or no sign-out, would
-     * describe their session incorrectly. It is read as an {@code Optional} rather than required:
-     * the handler is reachable by a direct request as well as by the forward, and a page that
-     * explains a refusal should render even if that request arrives without a principal.
+     * <p>The page is built on the signed-in layout, and gets its {@code currentUser} from
+     * {@code config.CurrentUserModelAdvice} like every other page — which is the right answer here
+     * for a reason worth stating: the advice tolerates an absent principal, and this page is
+     * reachable by a direct request as well as by the forward. A page that explains a refusal should
+     * render either way.
      */
     @GetMapping("/access-denied")
-    public String accessDenied(Model model) {
-        model.addAttribute("currentUser",
-                currentUserService.currentUser().map(CurrentUserView::from).orElse(null));
+    public String accessDenied() {
         return "auth/access-denied";
     }
 }

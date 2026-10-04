@@ -1,5 +1,7 @@
 package com.vit.assignmentportal.review;
 
+import com.vit.assignmentportal.common.PortalException;
+
 /**
  * The reviewer's decision was not acceptable, and nothing was recorded.
  *
@@ -7,7 +9,8 @@ package com.vit.assignmentportal.review;
  * {@code InvalidSubmissionException}'s: the message is <strong>safe to render verbatim</strong>. It
  * is composed by this application, it never includes text the client supplied, and it never
  * describes a filesystem path, a SQL statement, or a configuration value
- * ({@code CLAUDE.md} §7 rule 11).
+ * ({@code CLAUDE.md} §7 rule 11). Inheriting {@link PortalException} is how that contract is
+ * declared rather than merely asserted in prose.
  *
  * <p>This is the <em>policy</em> failure — a rejection with no reason, an approval that carried
  * one, an outcome that is not a decision. It is distinct from
@@ -19,7 +22,7 @@ package com.vit.assignmentportal.review;
  * a result object every caller must remember to inspect makes it possible to ignore a refusal and
  * record the decision anyway.
  */
-public class InvalidReviewException extends RuntimeException {
+public class InvalidReviewException extends PortalException {
 
     public InvalidReviewException(String message) {
         super(message);

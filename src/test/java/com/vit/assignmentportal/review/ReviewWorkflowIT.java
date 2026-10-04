@@ -434,6 +434,36 @@ class ReviewWorkflowIT extends MySqlIntegrationTest {
                 .andExpect(status().isNotFound());
     }
 
+    /**
+     * An identifier nobody holds is a 404 with the shared error page, not a 500.
+     *
+     * <p>This is the one route where a 404 is not a privacy decision. A reviewer may open any
+     * submission, so there is no ownership clause to fold "not yours" into "not found" — the
+     * identifier simply resolves to nothing, and it arrives from the address bar with nothing having
+     * validated it. A lookup that missed is an ordinary event; answering it with a 500, or with a
+     * body that named the exception, would be the leak {@code CLAUDE.md} §7 rule 11 forbids.
+     *
+     * <p>The body is asserted rather than only the status, because the status alone would pass for a
+     * response that explained itself too well.
+     */
+    @Test
+    void answersNotFoundForAnIdentifierNobodyHolds() throws Exception {
+        SignedIn reviewer = signInAs(Role.REVIEWER, "review-unknown-id");
+
+        String body = mockMvc.perform(
+                        get("/review/submissions/" + UUID.randomUUID()).session(reviewer.session()))
+                .andExpect(status().isNotFound())
+                .andExpect(view().name("error"))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        assertThat(body)
+                .contains("Error 404")
+                .doesNotContain("SubmissionNotFoundException")
+                .doesNotContain("com.vit.assignmentportal");
+    }
+
     // ------------------------------------------------------------------------
     // Download (FR-17)
     // ------------------------------------------------------------------------

@@ -52,23 +52,25 @@ spring:
     baseline-on-migrate: false
     validate-on-migrate: true
 
-  # Uploads are capped at 10 MB in the MVP (FR-7). Rejecting oversized multipart requests
-  # here stops them before a byte reaches application code.
+  # Uploads are capped in the MVP (FR-7). Rejecting an oversized multipart request here stops it
+  # before a byte reaches application code.
   #
-  # The two limits are deliberately NOT the same number. `max-file-size` is the real
-  # limit and matches FileValidationService.MAX_FILE_SIZE_BYTES exactly. `max-request-size`
-  # is larger, because it caps the whole multipart envelope — the boundaries, the form
-  # fields, and the file together. Setting it to exactly 10MB would reject a legitimate
-  # 10MB file on the strength of the few hundred bytes of envelope around it, and the user
-  # would be told their file was too large when it was not.
+  # The two limits are deliberately NOT the same number. `max-file-size` is the real limit and is
+  # the SAME SETTING as app.upload.max-file-size below — both read UPLOAD_MAX_FILE_SIZE, so the
+  # container and the validator cannot disagree about how large "too large" is. `max-request-size`
+  # is larger, because it caps the whole multipart envelope: the boundaries, the form fields, and
+  # the file together. Setting it to the file limit exactly would reject a legitimate file on the
+  # strength of the few hundred bytes of envelope around it, and the user would be told their file
+  # was too large when it was not. Raise UPLOAD_MAX_REQUEST_SIZE alongside UPLOAD_MAX_FILE_SIZE if
+  # the file limit is ever raised above 10MB.
   #
-  # Both are a backstop, not the control: FileValidationService enforces the same limit in
-  # application code, where it can produce a message. The container's limit exists so that
-  # an oversized request is refused without being buffered (CLAUDE.md §7 rule 4).
+  # The container's refusal is a backstop, not the control: the application must be able to produce
+  # a message, which only FileValidationService can do. This limit exists so an oversized request is
+  # refused without being buffered (CLAUDE.md §7 rule 4).
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 11MB
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:10MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:11MB}
 
 # ---------------------------------------------------------------------------
 # Operability — the delivery pipeline's health-check and rollback stages depend
@@ -130,6 +132,27 @@ app:
     # uploads must never be written (CLAUDE.md §7 rule 7).
     root: ${UPLOAD_STORAGE_PATH:./uploads}
 
+  upload:
+    # The upload limits (FR-7). Bound by storage.UploadProperties and enforced by
+    # storage.FileValidationService; the message a refused upload is shown is derived from
+    # the limit below, so there is one spelling of "too large" rather than three.
+    #
+    # `max-file-size` deliberately resolves from the SAME variable as
+    # spring.servlet.multipart.max-file-size above, and the two defaults are equal. The
+    # container's parser and the validator must refuse at the same size: if the parser's limit
+    # were the lower of the two, an upload would be stopped by the container and answered with
+    # the validator's sentence naming a size that did not refuse it.
+    # UiRenderingIT.appliesTheSameUploadLimitInBothPlacesThatReadIt asserts they agree; change
+    # them together or not at all.
+    max-file-size: ${UPLOAD_MAX_FILE_SIZE:10MB}
+
+    # The accepted media type. `application/pdf` is the only value the application can prove:
+    # FileValidationService establishes the format by checking the bytes begin with the %PDF-
+    # signature (CLAUDE.md §7 rule 4), and that check is written for PDF. Naming another format
+    # here is refused at startup with a message saying so, rather than accepted and then
+    # rejecting every upload at the last check.
+    allowed-content-type: ${UPLOAD_ALLOWED_CONTENT_TYPE:application/pdf}
+
   seed:
     # Whether DevelopmentUserSeeder may create the demo accounts. It is also gated on
     # the `dev` profile, so this being true is not sufficient on its own — the bean
@@ -147,3 +170,18 @@ logging:
   level:
     root: INFO
     com.vit.assignmentportal: INFO
+
+  pattern:
+    # The request identifier, on every line (config/RequestIdFilter puts it in the logging
+    # context under the key `requestId`).
+    #
+    # This line is load-bearing rather than cosmetic. Spring Boot's default console pattern prints
+    # the tracing keys — `traceId` and `spanId` — and no other MDC entry. Nothing here configures
+    # tracing, so without an explicit pattern the identifier would be propagated into the logging
+    # context and absent from every line: available to code, invisible in the log, and useless for
+    # the one thing it exists to do — finding the lines a failing request produced
+    # (docs/operations/observability.md §2).
+    #
+    # `:-` is the empty default, so lines written before a request exists (startup, scheduled work)
+    # render `[]` rather than the literal pattern.
+    level: "%5p [%X{requestId:-}]"

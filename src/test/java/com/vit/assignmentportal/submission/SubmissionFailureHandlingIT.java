@@ -18,11 +18,13 @@ import com.vit.assignmentportal.storage.StorageException;
 import com.vit.assignmentportal.storage.StorageIdentifier;
 import com.vit.assignmentportal.storage.StorageProperties;
 import com.vit.assignmentportal.storage.StorageService;
+import com.vit.assignmentportal.storage.UploadProperties;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -74,6 +76,26 @@ class SubmissionFailureHandlingIT extends MySqlIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    /**
+     * The application's own time source, reused rather than replaced.
+     *
+     * <p>The two services built by hand below are the shipped service with one collaborator swapped,
+     * so everything that is <em>not</em> under test has to be the real thing. A clock of this test's
+     * own would be a second, different answer to "what time is it" — and the point of injecting one
+     * is that there is exactly one.
+     */
+    @Autowired
+    private Clock clock;
+
+    /**
+     * The upload limits as the running context bound them, reused for the same reason as the clock.
+     *
+     * <p>Hard-coding a limit here would let a hand-built validator accept a file the shipped one
+     * refuses, which is precisely the disagreement the validation tests exist to catch.
+     */
+    @Autowired
+    private UploadProperties uploadProperties;
 
     @MockitoBean
     private SubmissionRepository submissionRepository;
@@ -163,8 +185,9 @@ class SubmissionFailureHandlingIT extends MySqlIntegrationTest {
                 submissionRepository,
                 statusHistoryRepository,
                 new StorageService(new StorageProperties(blockedRoot)),
-                new FileValidationService(),
-                new ChecksumService());
+                new FileValidationService(uploadProperties),
+                new ChecksumService(),
+                clock);
 
         assertThatThrownBy(() -> serviceWithAnUnusableVolume.submit(student, pdf(), "Essay one", "CS101"))
                 .isInstanceOf(StorageException.class);
@@ -218,8 +241,9 @@ class SubmissionFailureHandlingIT extends MySqlIntegrationTest {
                 submissionRepository,
                 statusHistoryRepository,
                 new UndeletableStorageService(scratch),
-                new FileValidationService(),
-                new ChecksumService());
+                new FileValidationService(uploadProperties),
+                new ChecksumService(),
+                clock);
 
         when(submissionRepository.save(any(Submission.class)))
                 .thenThrow(new DataIntegrityViolationException("simulated: the row was refused"));

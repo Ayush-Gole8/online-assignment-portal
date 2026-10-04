@@ -1,5 +1,7 @@
 package com.vit.assignmentportal.submission;
 
+import com.vit.assignmentportal.common.PortalException;
+
 /**
  * A reviewer tried to decide a submission that already has a terminal status.
  *
@@ -18,11 +20,12 @@ package com.vit.assignmentportal.submission;
  * page rather than a silent overwrite.
  *
  * <p>Carries a message written for a person and safe to render verbatim — it names no identifier,
- * no SQL, and no internal state ({@code CLAUDE.md} §7 rule 11). No {@code @ResponseStatus}: the
- * reviewer flow catches this and re-renders the page with the message, the same way
- * {@link InvalidSubmissionException} is handled, rather than surfacing a bare error page.
+ * no SQL, and no internal state ({@code CLAUDE.md} §7 rule 11), which is what {@link PortalException}
+ * declares. The reviewer flow catches this and re-renders the page with the message rather than
+ * surfacing a bare error page; if one ever escaped that flow, the web layer's handler answers
+ * {@code 409 Conflict} — the decision is refused because of the state the resource is in.
  */
-public class SubmissionAlreadyDecidedException extends RuntimeException {
+public class SubmissionAlreadyDecidedException extends PortalException {
 
     public SubmissionAlreadyDecidedException(String message) {
         super(message);

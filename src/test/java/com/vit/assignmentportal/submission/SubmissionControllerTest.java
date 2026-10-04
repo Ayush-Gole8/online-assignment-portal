@@ -5,8 +5,10 @@ import static org.mockito.Mockito.mock;
 
 import com.vit.assignmentportal.auth.CurrentUserService;
 import com.vit.assignmentportal.storage.FileValidationService;
+import com.vit.assignmentportal.storage.UploadProperties;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.util.unit.DataSize;
 import org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap;
 
 /**
@@ -18,13 +20,29 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap;
  * layer, which is the whole reason this class exists: without it, the one code path a real
  * oversized upload takes would be untested and the comment claiming otherwise would be a lie.
  *
- * <p>No Spring context. The handler reads nothing from the controller's collaborators, so a
- * context would add a second of startup and prove nothing.
+ * <p>No Spring context. The controller is given a real {@link FileValidationService} over the same
+ * committed defaults the application binds, because the property under test is that the container's
+ * refusal and the validator's refusal say the same thing — and a mock would let the two agree by
+ * construction rather than by accident.
  */
 class SubmissionControllerTest {
 
+    /**
+     * The limits as {@code application.yml} commits them.
+     *
+     * <p>Constructed directly rather than bound from a context so this test stays a unit test. The
+     * separate question — whether the file in the repository actually binds to these values — is an
+     * integration test's, and is asserted where the real context is loaded
+     * ({@code UiRenderingIT.theCommittedUploadLimitsAreTheDocumentedOnes}).
+     */
+    private static final UploadProperties UPLOAD_PROPERTIES =
+            new UploadProperties(DataSize.ofMegabytes(10), "application/pdf");
+
+    private final FileValidationService fileValidationService =
+            new FileValidationService(UPLOAD_PROPERTIES);
+
     private final SubmissionController controller = new SubmissionController(
-            mock(SubmissionService.class), mock(CurrentUserService.class));
+            mock(SubmissionService.class), fileValidationService, mock(CurrentUserService.class));
 
     /**
      * The container's refusal must produce the <em>same sentence</em> the validator produces.
@@ -33,6 +51,10 @@ class SubmissionControllerTest {
      * Asserting equality with the validator's own output asserts the property that actually
      * matters: a student who uploads 11 MB and a student who uploads 10 MB and one byte must not be
      * told two different things about the same limit.
+     *
+     * <p>That property survived a change the literal would have hidden: the sentence is now derived
+     * from the configured limit rather than written out in both places, so this test would fail if
+     * either side stopped deriving it.
      */
     @Test
     void answersAnOversizedUploadWithTheMessageTheValidatorWouldProduce() {
@@ -72,11 +94,11 @@ class SubmissionControllerTest {
     /** One byte over the limit, which the validator refuses on size before reading any content. */
     private static String messageTheValidatorProducesForAnOversizedFile() {
         byte[] oneByteOver = new byte[Math.toIntExact(
-                FileValidationService.MAX_FILE_SIZE_BYTES + 1)];
+                UPLOAD_PROPERTIES.maxFileSizeBytes() + 1)];
 
-        return new FileValidationService()
+        return new FileValidationService(UPLOAD_PROPERTIES)
                 .validate(new MockMultipartFile("file", "essay.pdf",
-                        FileValidationService.PDF_CONTENT_TYPE, oneByteOver))
+                        UPLOAD_PROPERTIES.allowedContentType(), oneByteOver))
                 .orElseThrow(() -> new AssertionError(
                         "The validator accepted a file over its own limit."));
     }

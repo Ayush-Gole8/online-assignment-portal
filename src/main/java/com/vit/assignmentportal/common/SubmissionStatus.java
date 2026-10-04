@@ -30,5 +30,19 @@ public enum SubmissionStatus {
     APPROVED,
 
     /** Refused by a reviewer, with a reason. Terminal. */
-    REJECTED
+    REJECTED;
+
+    /**
+     * Whether this status is a reviewer's decision — one of the two terminal outcomes.
+     *
+     * <p>The distinction matters because {@link #SUBMITTED} is a status but not a decision, and a
+     * form field can carry it. Both the reviewer's policy ({@code review.ReviewService}) and the
+     * transition mechanism ({@code submission.SubmissionService}) have to answer this question, and
+     * a literal {@code status != APPROVED && status != REJECTED} written in both is the same rule
+     * stated twice. Stating it once, on the vocabulary it is about, is what keeps the two from
+     * drifting — and it puts the rule where a fourth status added later must come and read it.
+     */
+    public boolean isDecision() {
+        return this == APPROVED || this == REJECTED;
+    }
 }

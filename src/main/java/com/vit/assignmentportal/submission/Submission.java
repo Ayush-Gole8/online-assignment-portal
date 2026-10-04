@@ -9,7 +9,6 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import java.time.Instant;
@@ -138,9 +137,24 @@ public class Submission {
     @Column(name = "status", nullable = false, length = 16)
     private SubmissionStatus status;
 
+    /**
+     * The row's birth.
+     *
+     * <p>Supplied by the caller — see {@link #upload} — rather than read from the wall clock here.
+     * Two rows are written for one upload: this one and its creation entry in
+     * {@code submission_status_history}. Both must carry the same instant, and
+     * {@code SubmissionService} is the only place that can supply one value to both.
+     */
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /**
+     * When the row last changed: the moment it was created, and then the moment it was decided.
+     *
+     * <p>Set by {@link #upload}, {@link #approve} and {@link #reject} — the only three things that
+     * ever write to a submission. The wall clock is not consulted here; the caller supplies the same
+     * instant it is recording everywhere else about this event.
+     */
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
@@ -192,7 +206,7 @@ public class Submission {
 
     private Submission(UUID studentId, String title, String courseCode, String originalFileName,
                        String storedFileName, String contentType, long fileSizeBytes,
-                       String checksumSha256) {
+                       String checksumSha256, Instant createdAt) {
         this.studentId = studentId;
         this.title = title;
         this.courseCode = courseCode;
@@ -201,6 +215,10 @@ public class Submission {
         this.contentType = contentType;
         this.fileSizeBytes = fileSizeBytes;
         this.checksumSha256 = checksumSha256;
+        this.createdAt = createdAt;
+        // A row that has just been created has just been changed. Equal rather than
+        // independently supplied, so the two columns cannot start out disagreeing.
+        this.updatedAt = createdAt;
         // The only status a submission can be created in. The transition out of it is
         // approve/reject below, and there is no method that sets any other value — which is what
         // keeps SUBMITTED -> APPROVED and SUBMITTED -> REJECTED the only reachable transitions.
@@ -224,13 +242,18 @@ public class Submission {
      * @param contentType      the validated media type
      * @param fileSizeBytes    the size of the stored artefact
      * @param checksumSha256   the digest of the stored bytes
+     * @param createdAt        the instant this submission was accepted, from the application's
+     *                         {@code Clock}. Read by the caller rather than here so that the creation
+     *                         entry written to {@code submission_status_history} carries the same
+     *                         instant as the row it describes
      */
     public static Submission upload(UUID studentId, String title, String courseCode,
                                     String originalFileName, String storedFileName,
                                     String contentType, long fileSizeBytes,
-                                    String checksumSha256) {
+                                    String checksumSha256, Instant createdAt) {
+        Objects.requireNonNull(createdAt, "createdAt");
         return new Submission(studentId, title, courseCode, originalFileName, storedFileName,
-                contentType, fileSizeBytes, checksumSha256);
+                contentType, fileSizeBytes, checksumSha256, createdAt);
     }
 
     /**
@@ -248,15 +271,20 @@ public class Submission {
      * status.
      *
      * @param reviewerId the deciding reviewer, taken from the authenticated principal
+     * @param reviewedAt the instant of the decision, from the application's {@code Clock} — supplied
+     *                   rather than read here so that the history row for this same transition
+     *                   carries one instant and not a second one taken microseconds later
      * @throws SubmissionAlreadyDecidedException if this submission is not {@code SUBMITTED}
      */
-    void approve(UUID reviewerId) {
+    void approve(UUID reviewerId, Instant reviewedAt) {
         requireUndecided();
         Objects.requireNonNull(reviewerId, "reviewerId");
+        Objects.requireNonNull(reviewedAt, "reviewedAt");
 
         this.status = SubmissionStatus.APPROVED;
-        this.reviewedAt = Instant.now();
+        this.reviewedAt = reviewedAt;
         this.reviewerId = reviewerId;
+        this.updatedAt = reviewedAt;
     }
 
     /**
@@ -269,20 +297,23 @@ public class Submission {
      *
      * @param reviewerId the deciding reviewer, taken from the authenticated principal
      * @param reason     why the work was refused; must not be blank
+     * @param reviewedAt the instant of the decision, from the application's {@code Clock}
      * @throws SubmissionAlreadyDecidedException if this submission is not {@code SUBMITTED}
      * @throws IllegalArgumentException          if the reason is missing or blank
      */
-    void reject(UUID reviewerId, String reason) {
+    void reject(UUID reviewerId, String reason, Instant reviewedAt) {
         requireUndecided();
         Objects.requireNonNull(reviewerId, "reviewerId");
+        Objects.requireNonNull(reviewedAt, "reviewedAt");
         if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("A rejection requires a reason.");
         }
 
         this.status = SubmissionStatus.REJECTED;
-        this.reviewedAt = Instant.now();
+        this.reviewedAt = reviewedAt;
         this.reviewerId = reviewerId;
         this.rejectionReason = reason;
+        this.updatedAt = reviewedAt;
     }
 
     /**
@@ -300,25 +331,24 @@ public class Submission {
     }
 
     /**
-     * Assigns the identifier and the timestamps on the way into the database.
+     * Assigns the identifier on the way into the database.
      *
      * <p>Doing it here rather than in the constructor keeps the entity's id {@code null} until it
      * is persisted, which is what lets Spring Data recognise the instance as new and issue an
      * {@code INSERT} rather than guessing at a {@code MERGE}.
+     *
+     * <p>The timestamps are <em>not</em> assigned here, and used to be. A lifecycle callback is the
+     * one place in this class that could reach the wall clock without anybody being able to see
+     * where the value came from or to substitute it — and it produced a second "now", taken later
+     * than the one {@code SubmissionService} recorded in the history. What remains is the part that
+     * genuinely belongs to persistence: a key is needed before the row exists, and nothing outside
+     * the database cares what it is.
      */
     @PrePersist
     void onInsert() {
-        Instant now = Instant.now();
         if (id == null) {
             id = UUID.randomUUID();
         }
-        this.createdAt = now;
-        this.updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        this.updatedAt = Instant.now();
     }
 
     public UUID getId() {
