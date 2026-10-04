@@ -49,7 +49,7 @@ What else could solve the same problem, and why is the proposal better?
 | Does this change the data model? | |
 | Does it change the workflow state machine? | |
 | Does it add a dependency? | |
-| Does it need a new pipeline stage? | |
+| Does it need a new Jenkins CI pipeline stage? | |
 | Does it need an ADR? | |
 
 ## Acceptance criteria

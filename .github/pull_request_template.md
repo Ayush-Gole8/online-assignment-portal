@@ -29,7 +29,7 @@ Note anything deliberately left out and why.
 - [ ] Breaking change (existing behaviour changes)
 - [ ] Refactor (no behaviour change)
 - [ ] Documentation only
-- [ ] Build / CI / tooling
+- [ ] Build / Jenkins CI / tooling
 
 ## Verification
 
@@ -40,6 +40,7 @@ If a check was skipped, say which and why. Paste real output below.
 
 | Check | Command | Result |
 | --- | --- | --- |
+| Jenkins CI | automatic on this PR | <!-- link the build, or paste the stage results --> |
 | Build | `./mvnw clean package` | <!-- pass / fail / not run --> |
 | Unit tests | `./mvnw test` | <!-- e.g. 42 tests, 0 failures --> |
 | Integration tests | `./mvnw verify` | <!-- pass / fail / not run --> |
@@ -49,6 +50,11 @@ If a check was skipped, say which and why. Paste real output below.
 <!--
 If a command was NOT run, say so plainly. An honest "integration tests not run locally,
 Docker unavailable" is far more useful than an unverified tick.
+
+Jenkins runs the same work as the commands above, split across named stages — Checkout,
+Validate, Unit Tests, Integration Tests, Package, Publish Test Reports, Archive Artifact
+(CONTRIBUTING.md §5, docs/operations/jenkins-ci.md). Jenkins is the authority: a green local
+run does not excuse a red pipeline, and a red pipeline is never merged.
 -->
 
 ## Self-review checklist
@@ -59,7 +65,7 @@ Docker unavailable" is far more useful than an unverified tick.
 - [ ] No commented-out code, debugging output, or TODO left behind.
 
 **Security** — see `SECURITY.md`
-- [ ] No secret, credential, token, or password is added — including in tests and CI files.
+- [ ] No secret, credential, token, or password is added — including in tests and Jenkins CI files.
 - [ ] New configuration is externalised, and no environment-specific value is hard-coded.
 - [ ] CSRF protection is not weakened.
 - [ ] Authorisation is enforced server-side for any new route or action.
