@@ -40,7 +40,7 @@ Before you file:
 - [ ] Workflow status (submission stays SUBMITTED, or a decision does not stick)
 - [ ] UI / rendering
 - [ ] Configuration or startup
-- [ ] Deployment / pipeline
+- [ ] Jenkins CI / Deployment pipeline
 - [ ] Not sure
 
 ## Environment
