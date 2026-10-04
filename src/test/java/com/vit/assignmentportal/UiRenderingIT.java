@@ -13,8 +13,10 @@ import com.vit.assignmentportal.auth.UserService;
 import com.vit.assignmentportal.common.Role;
 import com.vit.assignmentportal.config.RequestIdFilter;
 import com.vit.assignmentportal.storage.UploadProperties;
+import com.vit.assignmentportal.support.TestCategories;
 import jakarta.servlet.RequestDispatcher;
 import java.util.List;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -47,6 +49,7 @@ import org.springframework.util.unit.DataSize;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Tag(TestCategories.INTEGRATION)
 class UiRenderingIT extends MySqlIntegrationTest {
 
     private static final String PASSWORD = "correct-horse-battery-staple";

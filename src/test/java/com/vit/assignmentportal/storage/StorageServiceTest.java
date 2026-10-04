@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vit.assignmentportal.support.TestCategories;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
  * atomicity claim. That is not achievable in-process, so it is stated here as a known gap rather
  * than asserted falsely in the test body.
  */
+@Tag(TestCategories.UNIT)
 class StorageServiceTest {
 
     private static final byte[] CONTENT = "%PDF-1.7\n%%EOF\n".getBytes(StandardCharsets.UTF_8);

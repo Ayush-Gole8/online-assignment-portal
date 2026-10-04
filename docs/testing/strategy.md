@@ -1,7 +1,9 @@
 # Test Strategy
 
-**Status:** Baselined — Milestone 0 (no tests exist yet)
-**Related:** [MVP requirements](../requirements/mvp.md) · [CLAUDE.md §6](../../CLAUDE.md) · [ADR-003](../adr/ADR-003-mysql-system-of-record.md)
+**Status:** Baselined. The philosophy below is unchanged; the suite it describes now exists. What
+is implemented, how it is tagged, and how to run it are in [test-strategy.md](test-strategy.md) —
+this document owns the intent, that one owns the execution.
+**Related:** [MVP requirements](../requirements/mvp.md) · [CLAUDE.md §6](../../CLAUDE.md) · [ADR-003](../adr/ADR-003-mysql-system-of-record.md) · [test-strategy.md](test-strategy.md) · [test-data.md](test-data.md)
 
 ---
 
@@ -108,6 +110,10 @@ test, not as acceptable noise — flakiness is how a suite gets disabled.
 - Unit test classes end in `Test` and are run by Surefire (`./mvnw test`).
 - Integration test classes end in `IT` and are run by Failsafe (`./mvnw verify`), so unit and
   integration feedback can be separated.
+- Every test class also carries a JUnit `@Tag` — `unit`, `integration`, or `e2e`. The name
+  selects the phase; the tag lets the build **withhold** a class from a phase its name does not
+  exclude (a browser test named `SomethingIT`, say). The tag values, the Maven `excludedGroups`
+  they feed, and the `-Pe2e` profile are in [test-strategy.md](test-strategy.md) §3–§5.
 - A test name states the behaviour and the condition:
   `rejectsUpload_whenFileExceedsTenMegabytes` — not `testUpload2`.
 

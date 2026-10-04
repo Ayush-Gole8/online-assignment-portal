@@ -3,9 +3,11 @@ package com.vit.assignmentportal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
+import com.vit.assignmentportal.support.TestCategories;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,6 +24,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * one typo away from being a comment (ADR-003, docs/testing/strategy.md §3.2).
  */
 @SpringBootTest
+@Tag(TestCategories.INTEGRATION)
 class ApplicationContextIT extends MySqlIntegrationTest {
 
     /**

@@ -2,9 +2,11 @@ package com.vit.assignmentportal.storage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vit.assignmentportal.support.TestCategories;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.health.contributor.Health;
@@ -21,6 +23,7 @@ import org.springframework.boot.health.contributor.Status;
  * <p>Uses real directories rather than mocks, deliberately. The whole value of this check is that it
  * does not trust a permission flag; a mocked {@code Files} would put the flag back.
  */
+@Tag(TestCategories.UNIT)
 class StorageHealthIndicatorTest {
 
     @TempDir

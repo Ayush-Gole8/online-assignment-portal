@@ -3,9 +3,11 @@ package com.vit.assignmentportal.config;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vit.assignmentportal.support.TestCategories;
 import jakarta.servlet.FilterChain;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -23,6 +25,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
  * are asserted first, and asserted as a pattern rather than as an equality, so a future change that
  * loosened the allowlist would fail here rather than in production.
  */
+@Tag(TestCategories.UNIT)
 class RequestIdFilterTest {
 
     private final RequestIdFilter filter = new RequestIdFilter();

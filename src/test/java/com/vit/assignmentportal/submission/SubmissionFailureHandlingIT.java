@@ -19,6 +19,7 @@ import com.vit.assignmentportal.storage.StorageIdentifier;
 import com.vit.assignmentportal.storage.StorageProperties;
 import com.vit.assignmentportal.storage.StorageService;
 import com.vit.assignmentportal.storage.UploadProperties;
+import com.vit.assignmentportal.support.TestCategories;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -28,6 +29,7 @@ import java.time.Clock;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,6 +61,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  * than asserted here.
  */
 @SpringBootTest
+@Tag(TestCategories.INTEGRATION)
 class SubmissionFailureHandlingIT extends MySqlIntegrationTest {
 
     private static final String PASSWORD = "correct-horse-battery-staple";

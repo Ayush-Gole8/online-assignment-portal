@@ -28,6 +28,28 @@
     <java.version>21</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+    <!--
+      The JUnit tag names that partition the suite, in one place so the build and the test
+      sources cannot drift. The matching constants are com.vit.assignmentportal.support.
+      TestCategories; if you rename one, rename it in both, because nothing here reads the
+      Java constant and nothing there reads this property
+      (docs/testing/test-strategy.md §3).
+    -->
+    <test.group.unit>unit</test.group.unit>
+    <test.group.integration>integration</test.group.integration>
+    <test.group.e2e>e2e</test.group.e2e>
+
+    <!--
+      What each phase refuses to run.
+
+      Surefire runs the unit phase, so it excludes the two slower categories. Failsafe runs
+      the integration phase, so it excludes only the browser suite — the browser suite is the
+      one that needs a running deployment, and it is the only category a plain `verify` must
+      never start (docs/testing/strategy.md §3.3).
+    -->
+    <surefire.excluded.groups>${test.group.integration},${test.group.e2e}</surefire.excluded.groups>
+    <failsafe.excluded.groups>${test.group.e2e}</failsafe.excluded.groups>
   </properties>
 
   <dependencies>
@@ -246,13 +268,35 @@
       </plugin>
 
       <!--
-        Unit tests (*Test) run under Surefire during `test`.
-        Integration tests (*IT) run under Failsafe during `integration-test`/`verify`,
-        so `./mvnw clean verify` covers both. See docs/testing/strategy.md §5.
+        The test pyramid, split across two plugins by convention and confirmed by tag.
+
+        Surefire runs the unit phase (`test`) over *Test; Failsafe runs the integration
+        phase (`integration-test`, `verify`) over *IT, so `./mvnw clean verify` covers both
+        (docs/testing/strategy.md §5). The class-name convention and the JUnit tag say the
+        same thing — *Test is tagged `unit`, *IT is tagged `integration`, a future *E2E is
+        tagged `e2e` — and the `excludedGroups` below makes the build honour the tag as well
+        as the name (docs/testing/test-strategy.md).
+
+        `excludedGroups` and not `groups`, deliberately. An incremental `groups` filter
+        silently drops any test whose author forgot to tag it; an `excludedGroups` filter
+        only ever withholds a test from the phase that must not run it, so a forgotten tag
+        costs nothing and a browser test misnamed `SomethingIT` still cannot run under
+        `verify`.
       -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <excludedGroups>${surefire.excluded.groups}</excludedGroups>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <excludedGroups>${failsafe.excluded.groups}</excludedGroups>
+        </configuration>
         <executions>
           <execution>
             <goals>
@@ -265,5 +309,53 @@
 
     </plugins>
   </build>
+
+  <profiles>
+    <!--
+      The explicit way to run the end-to-end suite later: ./mvnw clean verify -Pe2e
+
+      Selenium is not a dependency yet and no *E2E test exists, so this profile is the
+      mechanism and not yet the evidence for anything. It is a separate profile because the
+      browser suite needs a running deployment and takes minutes rather than seconds
+      (docs/testing/strategy.md §3.3), so it must never be something a plain `verify` can
+      start by accident — the profile has to be named, and naming it is the acknowledgement
+      that a browser and a live server are wanted.
+
+      `failIfNoTests` is false so the profile is inert until the first *E2E test lands,
+      rather than turning a pipeline stage red for a test nobody has written yet.
+    -->
+    <profile>
+      <id>e2e</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-failsafe-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>e2e-tests</id>
+                <goals>
+                  <goal>integration-test</goal>
+                  <goal>verify</goal>
+                </goals>
+                <configuration>
+                  <includes>
+                    <include>**/*E2E.java</include>
+                  </includes>
+                  <groups>${test.group.e2e}</groups>
+                  <!--
+                    Overrides the plugin-level exclusion, which is `e2e` — without this the
+                    parent configuration would exclude the very group this execution selects.
+                  -->
+                  <excludedGroups>${test.group.integration}</excludedGroups>
+                  <failIfNoTests>false</failIfNoTests>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 
 </project>

@@ -6,6 +6,8 @@ import static org.mockito.Mockito.mock;
 import com.vit.assignmentportal.auth.CurrentUserService;
 import com.vit.assignmentportal.storage.FileValidationService;
 import com.vit.assignmentportal.storage.UploadProperties;
+import com.vit.assignmentportal.support.TestCategories;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.util.unit.DataSize;
@@ -25,6 +27,7 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap;
  * refusal and the validator's refusal say the same thing — and a mock would let the two agree by
  * construction rather than by accident.
  */
+@Tag(TestCategories.UNIT)
 class SubmissionControllerTest {
 
     /**

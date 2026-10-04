@@ -9,6 +9,7 @@ import com.vit.assignmentportal.auth.DatabaseUserDetailsService;
 import com.vit.assignmentportal.auth.UserService;
 import com.vit.assignmentportal.common.Role;
 import com.vit.assignmentportal.common.SubmissionStatus;
+import com.vit.assignmentportal.support.TestCategories;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
@@ -21,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -66,6 +68,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * about the database rather than a property of the ORM's merge path.
  */
 @SpringBootTest
+@Tag(TestCategories.INTEGRATION)
 class SubmissionConcurrencyIT extends MySqlIntegrationTest {
 
     private static final String PASSWORD = "correct-horse-battery-staple";

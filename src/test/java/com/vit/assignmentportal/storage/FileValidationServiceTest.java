@@ -3,7 +3,9 @@ package com.vit.assignmentportal.storage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vit.assignmentportal.support.TestCategories;
 import java.nio.charset.StandardCharsets;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.util.unit.DataSize;
@@ -20,6 +22,7 @@ import org.springframework.util.unit.DataSize;
  * wrong. Those are the shapes an attacker actually sends, and each is asserted separately so a
  * future refactor cannot quietly drop one of the checks and still pass.
  */
+@Tag(TestCategories.UNIT)
 class FileValidationServiceTest {
 
     private static final String PDF = UploadProperties.PDF_CONTENT_TYPE;

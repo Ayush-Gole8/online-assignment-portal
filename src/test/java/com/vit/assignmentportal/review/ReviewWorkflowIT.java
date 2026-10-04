@@ -18,10 +18,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.vit.assignmentportal.MySqlIntegrationTest;
 import com.vit.assignmentportal.auth.UserService;
 import com.vit.assignmentportal.common.Role;
+import com.vit.assignmentportal.support.TestCategories;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -54,6 +56,7 @@ import org.springframework.test.web.servlet.ResultActions;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Tag(TestCategories.INTEGRATION)
 class ReviewWorkflowIT extends MySqlIntegrationTest {
 
     private static final String PASSWORD = "correct-horse-battery-staple";
