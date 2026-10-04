@@ -3,7 +3,9 @@ package com.vit.assignmentportal.storage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vit.assignmentportal.support.TestCategories;
 import java.util.UUID;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
  * passing, the containment check in {@code StorageService.resolve} is the only thing left standing
  * between an upload and the filesystem.
  */
+@Tag(TestCategories.UNIT)
 class StorageIdentifierTest {
 
     @Test

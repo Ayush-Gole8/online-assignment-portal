@@ -17,8 +17,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.vit.assignmentportal.MySqlIntegrationTest;
 import com.vit.assignmentportal.auth.UserService;
 import com.vit.assignmentportal.common.Role;
+import com.vit.assignmentportal.support.TestCategories;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -48,6 +50,7 @@ import org.springframework.test.web.servlet.MvcResult;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Tag(TestCategories.INTEGRATION)
 class SubmissionAccessIT extends MySqlIntegrationTest {
 
     private static final String PASSWORD = "correct-horse-battery-staple";

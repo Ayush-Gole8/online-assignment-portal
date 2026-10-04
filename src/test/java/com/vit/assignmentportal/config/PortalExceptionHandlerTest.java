@@ -8,8 +8,10 @@ import com.vit.assignmentportal.storage.StorageException;
 import com.vit.assignmentportal.submission.InvalidSubmissionException;
 import com.vit.assignmentportal.submission.SubmissionAlreadyDecidedException;
 import com.vit.assignmentportal.submission.SubmissionNotFoundException;
+import com.vit.assignmentportal.support.TestCategories;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
@@ -29,6 +31,7 @@ import org.springframework.web.servlet.ModelAndView;
  * same view" and "no failure puts anything but a number in the model" cannot be, and they are the
  * assertions {@code CLAUDE.md} §7 rule 11 actually rests on.
  */
+@Tag(TestCategories.UNIT)
 class PortalExceptionHandlerTest {
 
     private static final PortalExceptionHandler HANDLER = new PortalExceptionHandler();

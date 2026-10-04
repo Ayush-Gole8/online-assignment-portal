@@ -3,6 +3,8 @@ package com.vit.assignmentportal.storage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.vit.assignmentportal.support.TestCategories;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.util.unit.DataSize;
 
@@ -18,6 +20,7 @@ import org.springframework.util.unit.DataSize;
  * {@code application.yml} reaches this record — is an integration test's question, and is asserted
  * where the real context is loaded.
  */
+@Tag(TestCategories.UNIT)
 class UploadPropertiesTest {
 
     @Test

@@ -1,6 +1,8 @@
 package com.vit.assignmentportal.auth;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import com.vit.assignmentportal.support.TestCategories;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  * a wiring question, and it is answered by {@code AuthenticationIT}, which signs in against the
  * real configuration and a real database.
  */
+@Tag(TestCategories.UNIT)
 class PasswordEncoderTest {
 
     private final PasswordEncoder encoder = new BCryptPasswordEncoder();

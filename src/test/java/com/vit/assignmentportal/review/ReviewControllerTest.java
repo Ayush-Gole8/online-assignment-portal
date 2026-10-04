@@ -13,7 +13,9 @@ import com.vit.assignmentportal.auth.CurrentUserService;
 import com.vit.assignmentportal.common.Role;
 import com.vit.assignmentportal.common.SubmissionStatus;
 import com.vit.assignmentportal.submission.SubmissionAlreadyDecidedException;
+import com.vit.assignmentportal.support.TestCategories;
 import java.util.UUID;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap;
@@ -33,6 +35,7 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap;
  * ({@code CLAUDE.md} §7 rule 11), and each has to describe something different, because the three
  * have different remedies: fix the form, accept that the work is done, or re-read the submission.
  */
+@Tag(TestCategories.UNIT)
 class ReviewControllerTest {
 
     private static final UUID SUBMISSION_ID = UUID.fromString("00000000-0000-0000-0000-0000000000aa");

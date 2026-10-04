@@ -2,7 +2,9 @@ package com.vit.assignmentportal.submission;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.vit.assignmentportal.support.TestCategories;
 import java.time.Instant;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.Test;
  * locale-data decision and not this class's. The full rendering is "{@code 1 Oct 2026, 14:45 IST}";
  * what is pinned below is every part of that the formatter actually computes.
  */
+@Tag(TestCategories.UNIT)
 class SubmissionTimestampFormatTest {
 
     /**

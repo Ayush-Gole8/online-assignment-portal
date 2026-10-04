@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
+import com.vit.assignmentportal.support.TestCategories;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.Test;
  * SHA-256, so a regression to a different algorithm, a different character encoding, or a
  * different hex case fails here and not in production three months later.
  */
+@Tag(TestCategories.UNIT)
 class ChecksumServiceTest {
 
     /** FIPS 180-4, the digest of the empty input. */
