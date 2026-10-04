@@ -338,8 +338,9 @@ something else found it:
   disclosure §7 rule 11 forbids, on the page an anonymous visitor is most likely to reach.
 
   Fixed by writing every comment that can reach a browser as a Thymeleaf **parser-level** comment,
-  which the parser discards before rendering — 51 comments across 18 of the 19 template files.
-  `fragments/portal-header.html`, which nothing references, was left alone and should be deleted.
+  which the parser discards before rendering — 51 comments across 18 of the 19 template files at the
+  time. The nineteenth, `fragments/portal-header.html`, was unreferenced dead code carrying ordinary
+  HTML comments; it has since been deleted, so every remaining template renders without commentary.
   The assertion was **not** relaxed; it now passes because nothing reaches the browser. A new
   `shipsNoTemplateCommentaryToTheBrowser` test enforces the rule on its own terms, so the next
   comment is caught even when it does not happen to contain the word "exception".

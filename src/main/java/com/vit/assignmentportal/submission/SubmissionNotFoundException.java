@@ -1,7 +1,6 @@
 package com.vit.assignmentportal.submission;
 
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.ResponseStatus;
+import com.vit.assignmentportal.common.PortalException;
 
 /**
  * No submission with that identifier belongs to the requesting student.
@@ -12,12 +11,14 @@ import org.springframework.web.bind.annotation.ResponseStatus;
  * discovering which submissions exist. A uniform 404 leaks nothing, and the ownership clause in
  * the query is what makes "not yours" collapse into "not found" without a special case.
  *
- * <p>{@code @ResponseStatus} rather than a handler in the controller: a 404 for a missing
- * resource is the same answer wherever it is raised, and there is no view to render — the page
- * simply is not there.
+ * <p><strong>The 404 is not declared here.</strong> It used to be a {@code @ResponseStatus} on this
+ * class, which put the mapping in the feature and the response in the framework, with no single
+ * place stating the whole vocabulary. The status now belongs to the one handler that translates
+ * every {@link PortalException} into a response — {@code config.PortalExceptionHandler} — so this
+ * class says what happened and the web layer says what that means over HTTP. The handler still
+ * answers 404.
  */
-@ResponseStatus(HttpStatus.NOT_FOUND)
-public class SubmissionNotFoundException extends RuntimeException {
+public class SubmissionNotFoundException extends PortalException {
 
     public SubmissionNotFoundException(String message) {
         super(message);

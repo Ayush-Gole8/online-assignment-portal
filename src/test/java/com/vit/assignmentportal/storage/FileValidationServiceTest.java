@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.util.unit.DataSize;
 
 /**
  * The upload rules, in isolation.
@@ -21,7 +22,21 @@ import org.springframework.mock.web.MockMultipartFile;
  */
 class FileValidationServiceTest {
 
-    private static final String PDF = FileValidationService.PDF_CONTENT_TYPE;
+    private static final String PDF = UploadProperties.PDF_CONTENT_TYPE;
+
+    /** The limits as {@code application.yml} commits them. */
+    private static final UploadProperties UPLOAD_PROPERTIES =
+            new UploadProperties(DataSize.ofMegabytes(10), PDF);
+
+    /**
+     * A deliberately different limit, used to prove the limit is a setting rather than a constant.
+     *
+     * <p>Before the limits were bound, this could not be written: the validator read a
+     * {@code private static final} of its own, so every test necessarily exercised ten mebibytes and
+     * nothing else.
+     */
+    private static final UploadProperties ONE_MEBIBYTE_LIMIT =
+            new UploadProperties(DataSize.ofMegabytes(1), PDF);
 
     /** A file whose bytes begin with the PDF signature and nothing else in particular. */
     private static final byte[] PDF_BYTES = "%PDF-1.7\n%%EOF\n".getBytes(StandardCharsets.UTF_8);
@@ -30,7 +45,7 @@ class FileValidationServiceTest {
     private static final byte[] NOT_A_PDF = "This is a text file wearing a PDF extension."
             .getBytes(StandardCharsets.UTF_8);
 
-    private final FileValidationService service = new FileValidationService();
+    private final FileValidationService service = new FileValidationService(UPLOAD_PROPERTIES);
 
     // ------------------------------------------------------------------------
     // Accepted
@@ -57,7 +72,7 @@ class FileValidationServiceTest {
 
     @Test
     void acceptsAFileExactlyAtTheSizeLimit() {
-        byte[] atTheLimit = pdfOfSize(FileValidationService.MAX_FILE_SIZE_BYTES);
+        byte[] atTheLimit = pdfOfSize(UPLOAD_PROPERTIES.maxFileSizeBytes());
 
         assertThat(service.validate(upload("essay.pdf", PDF, atTheLimit))).isEmpty();
     }
@@ -68,7 +83,7 @@ class FileValidationServiceTest {
 
     @Test
     void refusesAFileWithANonPdfExtension() {
-        assertThat(service.validate(upload("essay.docx", PDF, PDF_BYTES)))
+        assertThat(service.validate(upload("essay.docx", PDF, PDF_BYTES)).orElseThrow())
                 .contains("Only PDF files are accepted.");
     }
 
@@ -83,7 +98,7 @@ class FileValidationServiceTest {
      */
     @Test
     void refusesPdfExtensionOnContentThatIsNotAPdf() {
-        assertThat(service.validate(upload("essay.pdf", PDF, NOT_A_PDF)))
+        assertThat(service.validate(upload("essay.pdf", PDF, NOT_A_PDF)).orElseThrow())
                 .contains("That file is not a valid PDF.");
     }
 
@@ -96,7 +111,7 @@ class FileValidationServiceTest {
     void refusesContentThatStopsShortOfTheFullSignature() {
         byte[] truncated = "%PDF".getBytes(StandardCharsets.UTF_8);
 
-        assertThat(service.validate(upload("essay.pdf", PDF, truncated)))
+        assertThat(service.validate(upload("essay.pdf", PDF, truncated)).orElseThrow())
                 .contains("That file is not a valid PDF.");
     }
 
@@ -104,24 +119,46 @@ class FileValidationServiceTest {
     void refusesAFileWhoseDeclaredContentTypeIsNotPdf() {
         // A browser reporting text/html for a .pdf is a signal worth refusing, even though the
         // client controls the value and the magic bytes are the real check.
-        assertThat(service.validate(upload("essay.pdf", "text/html", PDF_BYTES)))
+        assertThat(service.validate(upload("essay.pdf", "text/html", PDF_BYTES)).orElseThrow())
                 .contains("Only PDF files are accepted.");
     }
 
     @Test
     void refusesAFileLargerThanTheLimit() {
-        byte[] tooLarge = pdfOfSize(FileValidationService.MAX_FILE_SIZE_BYTES + 1);
+        byte[] tooLarge = pdfOfSize(UPLOAD_PROPERTIES.maxFileSizeBytes() + 1);
 
         // orElseThrow rather than asserting on the Optional directly: OptionalAssert.contains is
         // an equality check, so it would need the whole sentence. Unwrapping gives a String, for
         // which contains() is the substring comparison this test means.
+        //
+        // Compared against the sentence the configuration itself produces rather than against a
+        // literal, so the assertion is "the refusal names the limit that was configured" rather
+        // than "the refusal is still worded the way it was on the day this test was written".
+        // UploadPropertiesTest separately pins how a limit is spelled.
         assertThat(service.validate(upload("essay.pdf", PDF, tooLarge)).orElseThrow())
-                .contains("larger than the 10 MB limit");
+                .isEqualTo(UPLOAD_PROPERTIES.oversizedMessage());
+    }
+
+    /**
+     * The limit that is applied is the one that was configured, not the one that used to be a
+     * constant.
+     *
+     * <p>The same bytes are refused by a one-mebibyte configuration and accepted by the shipped
+     * ten-mebibyte one, which is what makes this a test of the setting rather than of the number.
+     */
+    @Test
+    void appliesTheConfiguredLimit() {
+        byte[] oneMebibyteAndOneByte = pdfOfSize(1024 * 1024 + 1);
+        FileValidationService oneMegabyte = new FileValidationService(ONE_MEBIBYTE_LIMIT);
+
+        assertThat(oneMegabyte.validate(upload("essay.pdf", PDF, oneMebibyteAndOneByte)).orElseThrow())
+                .contains("larger than the 1 MB limit");
+        assertThat(service.validate(upload("essay.pdf", PDF, oneMebibyteAndOneByte))).isEmpty();
     }
 
     @Test
     void refusesAnEmptyFile() {
-        assertThat(service.validate(upload("essay.pdf", PDF, new byte[0])))
+        assertThat(service.validate(upload("essay.pdf", PDF, new byte[0])).orElseThrow())
                 .contains("Choose a PDF to upload.");
     }
 
@@ -137,7 +174,7 @@ class FileValidationServiceTest {
      */
     @Test
     void refusesAMissingFile() {
-        assertThat(service.validate(null)).contains("Choose a PDF to upload.");
+        assertThat(service.validate(null).orElseThrow()).contains("Choose a PDF to upload.");
     }
 
     // ------------------------------------------------------------------------

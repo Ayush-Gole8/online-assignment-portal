@@ -2,7 +2,7 @@ package com.vit.assignmentportal.submission;
 
 import com.vit.assignmentportal.auth.AuthenticatedUser;
 import com.vit.assignmentportal.auth.CurrentUserService;
-import com.vit.assignmentportal.auth.CurrentUserView;
+import com.vit.assignmentportal.storage.FileValidationService;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
@@ -10,7 +10,6 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,11 +31,18 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
  * <h2>Authorisation happens in the service, not here</h2>
  *
  * <p>This class does not check whether the submission being opened belongs to the caller. It
- * passes the caller's identifier to {@link SubmissionService#findForStudent}, which looks the
+ * passes the caller's identifier to {@link SubmissionService#detailForStudent}, which looks the
  * submission up <em>by owner</em>. A check written here would be a check that the next controller
  * has to remember to repeat; a query that cannot return somebody else's row does not.
  *
- * <p>The route itself is guarded by {@code anyRequest().authenticated()} in {@code
+ * <h2>What this class no longer does</h2>
+ *
+ * <p>It does not put the signed-in user in the model — {@code config.CurrentUserModelAdvice} does
+ * that for every page — and it does not translate a page of submissions into read models, which
+ * {@link SubmissionService} now does inside the transaction that read them. What is left is what a
+ * controller should be: it reads a request, calls one service method, names a view.
+ *
+ * <p>The route is guarded by {@code anyRequest().authenticated()} in {@code
  * SecurityConfiguration}, so no handler below can run without a principal — which is what makes
  * {@link CurrentUserService#requireCurrentUser()} safe to call unconditionally.
  */
@@ -54,24 +60,15 @@ public class SubmissionController {
     private static final int LIST_PAGE_SIZE = 10;
 
     private final SubmissionService submissionService;
+    private final FileValidationService fileValidationService;
     private final CurrentUserService currentUserService;
 
     public SubmissionController(SubmissionService submissionService,
+                                FileValidationService fileValidationService,
                                 CurrentUserService currentUserService) {
         this.submissionService = submissionService;
+        this.fileValidationService = fileValidationService;
         this.currentUserService = currentUserService;
-    }
-
-    /**
-     * The signed-in student, for the page header.
-     *
-     * <p>A view model, not the principal: see {@link CurrentUserView}. Putting it in the model
-     * once here rather than in each handler keeps the header consistent across all three pages,
-     * and keeps every template free of {@code SecurityContext} access.
-     */
-    @ModelAttribute("currentUser")
-    public CurrentUserView currentUser() {
-        return CurrentUserView.from(currentUserService.requireCurrentUser());
     }
 
     /** The upload form. */
@@ -132,8 +129,7 @@ public class SubmissionController {
         AuthenticatedUser student = currentUserService.requireCurrentUser();
 
         PageRequest request = PageRequest.of(Math.max(page, 0), LIST_PAGE_SIZE);
-        model.addAttribute("submissions",
-                submissionService.listForStudent(student.id(), request).map(SubmissionSummary::from));
+        model.addAttribute("submissions", submissionService.listForStudent(student.id(), request));
 
         return "submission/list";
     }
@@ -153,11 +149,8 @@ public class SubmissionController {
     public String detail(@PathVariable UUID id, Model model) {
         AuthenticatedUser student = currentUserService.requireCurrentUser();
 
-        model.addAttribute("submission",
-                SubmissionDetail.from(submissionService.findForStudent(student.id(), id)));
-        model.addAttribute("history", submissionService.historyForStudent(student.id(), id).stream()
-                .map(SubmissionHistoryEntry::from)
-                .toList());
+        model.addAttribute("submission", submissionService.detailForStudent(student.id(), id));
+        model.addAttribute("history", submissionService.historyForStudent(student.id(), id));
 
         return "submission/detail";
     }
@@ -189,16 +182,19 @@ public class SubmissionController {
      *
      * <p>{@code spring.servlet.multipart.max-file-size} stops an oversized request at the servlet
      * layer, so it never reaches {@link #submit} and never reaches
-     * {@code FileValidationService} — which is the point of having the limit there: the bytes are
-     * never buffered. The cost is that the refusal arrives as an exception rather than as a
-     * message, so it is translated here into the same sentence the validator would have produced.
+     * {@code FileValidationService.validate} — which is the point of having the limit there: the
+     * bytes are never buffered. The cost is that the refusal arrives as an exception rather than as
+     * a message, so it is translated here into the same sentence the validator would have produced.
+     * That sentence is asked for rather than written out: it is derived from the configured limit,
+     * and a copy of it here would go on saying "10 MB" after the limit was lowered.
      *
      * <p>This handler is unreachable through {@code MockMvc}, which does not run the container's
      * multipart parsing. It is covered by a unit test that throws the exception directly.
      */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public String oversizedUpload(RedirectAttributes redirectAttributes) {
-        redirectAttributes.addFlashAttribute("error", "The file is larger than the 10 MB limit.");
+        redirectAttributes.addFlashAttribute("error",
+                fileValidationService.oversizedFileMessage());
         return "redirect:/submissions/new";
     }
 }

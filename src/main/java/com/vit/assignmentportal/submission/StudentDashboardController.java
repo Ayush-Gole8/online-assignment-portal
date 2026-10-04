@@ -2,12 +2,10 @@ package com.vit.assignmentportal.submission;
 
 import com.vit.assignmentportal.auth.AuthenticatedUser;
 import com.vit.assignmentportal.auth.CurrentUserService;
-import com.vit.assignmentportal.auth.CurrentUserView;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.RequestMapping;
 
 /**
@@ -55,21 +53,16 @@ public class StudentDashboardController {
         this.currentUserService = currentUserService;
     }
 
-    /** The signed-in student, for the navigation fragment. A view model, never the principal. */
-    @ModelAttribute("currentUser")
-    public CurrentUserView currentUser() {
-        return CurrentUserView.from(currentUserService.requireCurrentUser());
-    }
-
     /** The dashboard: how much is waiting, how much is decided, and the most recent few. */
     @GetMapping("/dashboard")
     public String dashboard(Model model) {
         AuthenticatedUser student = currentUserService.requireCurrentUser();
 
         model.addAttribute("counts", submissionService.countsForStudent(student.id()));
+        // Already read models: the projection happens inside the transaction that read the rows
+        // (SubmissionService.listForStudent), so the page never sees a Submission.
         model.addAttribute("recentSubmissions",
-                submissionService.listForStudent(student.id(), PageRequest.of(0, RECENT_LIMIT))
-                        .map(SubmissionSummary::from));
+                submissionService.listForStudent(student.id(), PageRequest.of(0, RECENT_LIMIT)));
 
         return "submission/dashboard";
     }

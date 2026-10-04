@@ -2,7 +2,6 @@ package com.vit.assignmentportal.review;
 
 import com.vit.assignmentportal.auth.AuthenticatedUser;
 import com.vit.assignmentportal.auth.CurrentUserService;
-import com.vit.assignmentportal.auth.CurrentUserView;
 import com.vit.assignmentportal.common.SubmissionStatus;
 import com.vit.assignmentportal.submission.SubmissionAlreadyDecidedException;
 import com.vit.assignmentportal.submission.SubmissionFileAttachment;
@@ -13,7 +12,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -72,12 +70,6 @@ public class ReviewController {
     public ReviewController(ReviewService reviewService, CurrentUserService currentUserService) {
         this.reviewService = reviewService;
         this.currentUserService = currentUserService;
-    }
-
-    /** The signed-in reviewer, for the page header. A view model, never the principal. */
-    @ModelAttribute("currentUser")
-    public CurrentUserView currentUser() {
-        return CurrentUserView.from(currentUserService.requireCurrentUser());
     }
 
     /**

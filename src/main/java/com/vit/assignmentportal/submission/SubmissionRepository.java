@@ -16,10 +16,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * authorised by role at the route and reviewing only one's own work would be meaningless.
  *
  * <p>There is deliberately no {@code findAll} in use. {@code JpaRepository} contributes it, and
- * {@code findById} — which the reviewer path does call, through
- * {@code SubmissionService.findForReview}, after the {@code /review/**} role rule has already
- * admitted the request. They are not hidden; that would mean not extending {@code JpaRepository}.
- * {@code SubmissionService} is the only intended entry point either way.
+ * {@code findById} — which the reviewer path does call, from inside {@code SubmissionService}'s
+ * reviewer-facing reads, after the {@code /review/**} role rule has already admitted the request.
+ * They are not hidden; that would mean not extending {@code JpaRepository}.
+ * {@code SubmissionService} is the only intended entry point either way, and the lookups it exposes
+ * return read models rather than entities, so a {@code Submission} cannot leave the feature.
  */
 public interface SubmissionRepository extends JpaRepository<Submission, UUID> {
 

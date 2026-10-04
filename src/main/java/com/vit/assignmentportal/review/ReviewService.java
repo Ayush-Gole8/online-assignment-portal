@@ -2,7 +2,6 @@ package com.vit.assignmentportal.review;
 
 import com.vit.assignmentportal.common.SubmissionStatus;
 import com.vit.assignmentportal.submission.DownloadableFile;
-import com.vit.assignmentportal.submission.Submission;
 import com.vit.assignmentportal.submission.SubmissionDetail;
 import com.vit.assignmentportal.submission.SubmissionHistoryEntry;
 import com.vit.assignmentportal.submission.SubmissionService;
@@ -58,14 +57,14 @@ public class ReviewService {
      * One page of the queue: submissions still awaiting a decision, longest-waiting first (FR-16).
      *
      * <p>Read models, not entities — the queue is rendered by a template, and
-     * {@link SubmissionSummary} is the type that exists so a view cannot reach a field it should
-     * not render. The mapping happens after the page is read, so only the rows on this page are
-     * projected; the total the page carries is still the count of the whole queue, which is what
-     * the pager needs.
+     * {@link SubmissionSummary} is the type that exists so a view cannot reach a field it should not
+     * render. The projection is done by {@link SubmissionService#listAwaitingReview}, inside the
+     * transaction that read the rows, so this method is a delegation and not a second place that
+     * knows how a submission becomes a summary.
      */
     @Transactional(readOnly = true)
     public Page<SubmissionSummary> queue(Pageable pageable) {
-        return submissionService.listAwaitingReview(pageable).map(SubmissionSummary::from);
+        return submissionService.listAwaitingReview(pageable);
     }
 
     /**
@@ -76,15 +75,13 @@ public class ReviewService {
      */
     @Transactional(readOnly = true)
     public SubmissionDetail view(UUID submissionId) {
-        return SubmissionDetail.from(submissionService.findForReview(submissionId));
+        return submissionService.detailForReview(submissionId);
     }
 
     /** One submission's transitions, oldest first. */
     @Transactional(readOnly = true)
     public List<SubmissionHistoryEntry> history(UUID submissionId) {
-        return submissionService.historyForReview(submissionId).stream()
-                .map(SubmissionHistoryEntry::from)
-                .toList();
+        return submissionService.historyForReview(submissionId);
     }
 
     /** One submission's file, so the reviewer can read the work before deciding (FR-17). */
@@ -118,19 +115,22 @@ public class ReviewService {
      * @param reviewerId   the deciding reviewer, from the authenticated principal
      * @param submissionId the submission to decide
      * @param decision     the outcome and its note
-     * @return the decided submission
      * @throws InvalidReviewException if the decision breaks one of the rules above
      * @throws com.vit.assignmentportal.submission.SubmissionAlreadyDecidedException if the
      *         submission has already been decided (FR-20)
      */
     @Transactional
-    public Submission decide(UUID reviewerId, UUID submissionId, ReviewDecision decision) {
+    public void decide(UUID reviewerId, UUID submissionId, ReviewDecision decision) {
         if (decision == null || decision.outcome() == null) {
             throw new InvalidReviewException("Choose whether to approve or reject this submission.");
         }
 
         SubmissionStatus outcome = decision.outcome();
-        if (outcome != SubmissionStatus.APPROVED && outcome != SubmissionStatus.REJECTED) {
+        // `isDecision` rather than a pair of literals. The same question is asked by
+        // SubmissionService.recordDecision, which asserts it before applying the transition, and a
+        // rule spelled out in both places is a rule that can be changed in one of them
+        // (SubmissionStatus.isDecision).
+        if (!outcome.isDecision()) {
             throw new InvalidReviewException(
                     "A decision must be either an approval or a rejection.");
         }
@@ -155,6 +155,6 @@ public class ReviewService {
                     "The reason may be at most " + MAX_NOTE_LENGTH + " characters.");
         }
 
-        return submissionService.recordDecision(reviewerId, submissionId, outcome, note);
+        submissionService.recordDecision(reviewerId, submissionId, outcome, note);
     }
 }

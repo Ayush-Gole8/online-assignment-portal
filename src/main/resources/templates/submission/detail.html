@@ -95,7 +95,7 @@
                     <div th:if="${submission.status.name() != 'SUBMITTED'}">
                         <dl class="row mb-0">
                             <dt class="col-sm-4 text-body-secondary fw-normal">Reviewed</dt>
-                            <dd class="col-sm-8" th:text="${submission.reviewedOn()}">2 Oct 2026, 11:00 UTC</dd>
+                            <dd class="col-sm-8" th:text="${submission.reviewedOn()}">2 Oct 2026, 16:30 IST</dd>
                         </dl>
 
                         <!--/* Present only for a rejection. The heading names the outcome, so a
@@ -124,7 +124,7 @@
             <ol class="timeline mb-0">
                 <li th:each="entry : ${history}">
                     <p class="timeline-when mb-0 text-body-secondary small"
-                       th:text="${entry.occurredOn()}">1 Oct 2026, 09:15 UTC</p>
+                       th:text="${entry.occurredOn()}">1 Oct 2026, 14:45 IST</p>
                     <p class="timeline-what mb-0 fw-semibold">
                         <span th:if="${entry.isCreation()}">Submitted for review</span>
                         <span th:unless="${entry.isCreation()}"
@@ -140,10 +140,10 @@
             <h2 class="h5">Timestamps</h2>
             <dl class="row mb-0">
                 <dt class="col-sm-3 text-body-secondary fw-normal">Submitted</dt>
-                <dd class="col-sm-9" th:text="${submission.submittedOn()}">1 Oct 2026, 09:15 UTC</dd>
+                <dd class="col-sm-9" th:text="${submission.submittedOn()}">1 Oct 2026, 14:45 IST</dd>
 
                 <dt class="col-sm-3 text-body-secondary fw-normal">Last changed</dt>
-                <dd class="col-sm-9" th:text="${submission.lastChangedOn()}">1 Oct 2026, 09:15 UTC</dd>
+                <dd class="col-sm-9" th:text="${submission.lastChangedOn()}">1 Oct 2026, 14:45 IST</dd>
             </dl>
         </div>
     </div>

@@ -196,7 +196,7 @@ Disabling it requires an ADR containing a threat analysis ([`CLAUDE.md` §7 rule
 The machinery:
 
 - Thymeleaf's Spring Security integration hooks any form written with **`th:action`** and injects
-  the token as a hidden `_csrf` field. Every form in `auth/login.html`, `fragments/portal-header.html`
+  the token as a hidden `_csrf` field. Every form in `auth/login.html`, `fragments/navbar.html`
   and `submission/upload.html` uses `th:action` for exactly this reason. A plain `action="/login"`
   produces a form with no token, and the request is refused with a 403 before it reaches
   authentication — the single most common way a working login page is broken by a well-meaning

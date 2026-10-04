@@ -9,11 +9,19 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 /**
- * Decides whether an uploaded file may be stored at all: PDF only, at most 10 MB, and verified
- * by its content rather than by what it claims to be ({@code CLAUDE.md} §7 rule 4).
+ * Decides whether an uploaded file may be stored at all: PDF only, at most the configured size, and
+ * verified by its content rather than by what it claims to be ({@code CLAUDE.md} §7 rule 4).
  *
- * <p>The five checks are ordered by cost and by how much the answer is worth, and the order is
- * load-bearing:
+ * <h2>What it decides, and what it is told</h2>
+ *
+ * <p>The two numbers it used to own — the size limit and the accepted media type — are now
+ * {@link UploadProperties}, bound from the environment and validated at startup. That split is the
+ * point: this class owns the <em>checks</em>, which are logic and belong in code, while the limits
+ * those checks apply are <em>settings</em>, which belong in configuration. A validator that also
+ * decided what the limits were could not be tested at a size other than ten mebibytes, and could not
+ * be told a limit by an environment.
+ *
+ * <h2>The five checks are ordered, and the order is load-bearing</h2>
  *
  * <ol>
  *   <li><strong>Empty.</strong> Cheapest possible rejection.</li>
@@ -38,21 +46,6 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 public class FileValidationService {
 
-    /**
-     * The maximum accepted size, matching {@code spring.servlet.multipart.max-file-size} in
-     * {@code application.yml} and the {@code ck_submissions_file_size} constraint in
-     * {@code V2__submissions.sql}.
-     *
-     * <p>Ten mebibytes, not ten million bytes. The limit is stated in the requirements as
-     * "10 MB", and the container-level limit is expressed in the same binary unit by Spring Boot;
-     * a decimal interpretation here would make the two disagree by roughly 4%, which is precisely
-     * the kind of gap that produces a bug nobody can reproduce.
-     */
-    public static final long MAX_FILE_SIZE_BYTES = 10L * 1024 * 1024;
-
-    /** The single accepted media type in the MVP (docs/requirements/mvp.md). */
-    public static final String PDF_CONTENT_TYPE = "application/pdf";
-
     private static final String PDF_EXTENSION = ".pdf";
 
     /**
@@ -61,6 +54,10 @@ public class FileValidationService {
      * <p>Checked rather than the shorter {@code %PDF} because the hyphen is part of the
      * specification and its absence is a reliable sign of a file that was not produced by a PDF
      * writer.
+     *
+     * <p>The one piece of format knowledge this class cannot be configured out of, and the reason
+     * {@link UploadProperties} refuses a media type other than {@code application/pdf} rather than
+     * letting a second format be named and then fail here.
      */
     private static final byte[] PDF_MAGIC_BYTES = {'%', 'P', 'D', 'F', '-'};
 
@@ -68,8 +65,19 @@ public class FileValidationService {
      * The width of the {@code original_file_name} column. A name longer than this cannot be
      * stored, so it is truncated on the way in rather than rejected — see
      * {@link #safeDisplayName(String)}.
+     *
+     * <p>Stated here rather than read from {@code submission.Submission}, because {@code storage} is
+     * a capability and may depend only on {@code common} — it cannot import a feature's entity
+     * (docs/architecture/application-structure.md §4 rule 2). The coupling is real and is why
+     * {@code V2__submissions.sql} and this constant are worth keeping in view together.
      */
     private static final int MAX_FILE_NAME_LENGTH = 255;
+
+    private final UploadProperties uploadProperties;
+
+    public FileValidationService(UploadProperties uploadProperties) {
+        this.uploadProperties = uploadProperties;
+    }
 
     /**
      * Reasons to refuse the upload, or empty when it is acceptable.
@@ -83,8 +91,8 @@ public class FileValidationService {
             return Optional.of("Choose a PDF to upload.");
         }
 
-        if (file.getSize() > MAX_FILE_SIZE_BYTES) {
-            return Optional.of("The file is larger than the 10 MB limit.");
+        if (file.getSize() > uploadProperties.maxFileSizeBytes()) {
+            return Optional.of(oversizedFileMessage());
         }
 
         String fileName = file.getOriginalFilename();
@@ -97,8 +105,9 @@ public class FileValidationService {
         }
 
         String declaredType = file.getContentType();
+        String acceptedType = acceptedContentType();
         if (declaredType != null && !declaredType.isBlank()
-                && !PDF_CONTENT_TYPE.equalsIgnoreCase(declaredType.trim())) {
+                && !acceptedType.equalsIgnoreCase(declaredType.trim())) {
             // Deliberately the same sentence as the extension failure. The client was told only
             // that the file is not acceptable; echoing the media type it claimed would describe
             // the check to someone probing it, and tells a genuine user nothing they can act on.
@@ -110,6 +119,31 @@ public class FileValidationService {
         }
 
         return Optional.empty();
+    }
+
+    /**
+     * The media type the portal accepts, for the caller that records it against a stored file.
+     *
+     * <p>{@link #validate(MultipartFile)} accepts a missing declared type deliberately, but
+     * {@code submissions.content_type} is {@code NOT NULL} and describes the type that was
+     * <em>validated</em> rather than the string the client claimed. This is that value, so the
+     * entity, the column, the migration and the validator all name one thing.
+     */
+    public String acceptedContentType() {
+        return uploadProperties.allowedContentType();
+    }
+
+    /**
+     * The sentence shown when a file is over the size limit.
+     *
+     * <p>Public because a second code path refuses an oversized upload: the container's
+     * {@code spring.servlet.multipart.max-file-size} rejects the request before this class ever sees
+     * it, and {@code SubmissionController} has to produce a message for that case too. Exposing the
+     * sentence here means both paths say the same thing about the same limit instead of each
+     * carrying its own copy of the number.
+     */
+    public String oversizedFileMessage() {
+        return uploadProperties.oversizedMessage();
     }
 
     /**

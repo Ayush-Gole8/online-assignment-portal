@@ -7,6 +7,8 @@ import com.vit.assignmentportal.storage.FileValidationService;
 import com.vit.assignmentportal.storage.StorageIdentifier;
 import com.vit.assignmentportal.storage.StorageService;
 import java.io.IOException;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -76,17 +78,37 @@ public class SubmissionService {
     private final StorageService storageService;
     private final FileValidationService fileValidationService;
     private final ChecksumService checksumService;
+    private final Clock clock;
 
     public SubmissionService(SubmissionRepository submissionRepository,
                              SubmissionStatusHistoryRepository statusHistoryRepository,
                              StorageService storageService,
                              FileValidationService fileValidationService,
-                             ChecksumService checksumService) {
+                             ChecksumService checksumService,
+                             Clock clock) {
         this.submissionRepository = submissionRepository;
         this.statusHistoryRepository = statusHistoryRepository;
         this.storageService = storageService;
         this.fileValidationService = fileValidationService;
         this.checksumService = checksumService;
+        this.clock = clock;
+    }
+
+    /**
+     * The application's current instant.
+     *
+     * <p>Every timestamp this feature writes — a submission's {@code createdAt} and {@code updatedAt},
+     * its {@code reviewedAt}, and each history row's {@code createdAt} — comes from here, so one
+     * event has one time. The alternative, letting each place that records something ask for
+     * {@code Instant.now()}, produces a decision whose history row is a few hundred microseconds
+     * after the {@code reviewed_at} beside it, and a test that cannot say what either should be.
+     *
+     * <p>The {@link Clock} is a bean supplied by {@code config.ClockConfiguration} and fixed to UTC.
+     * This class neither chooses the zone nor reads the JVM default — it asks for the current
+     * instant and records what it is told.
+     */
+    private Instant now() {
+        return clock.instant();
     }
 
     /**
@@ -133,6 +155,11 @@ public class SubmissionService {
 
         StorageIdentifier stored = storageService.store(content);
 
+        // Read once, used by both rows below. Reading it twice would be two calls to the Clock and
+        // therefore two instants, which is exactly the disagreement this feature's history is
+        // supposed to make impossible.
+        Instant submittedAt = now();
+
         Submission submission = Submission.upload(
                 student.id(),
                 acceptedTitle,
@@ -142,11 +169,13 @@ public class SubmissionService {
                 // The validated type, not file.getContentType(). The client's value is advisory
                 // and may be absent entirely — FileValidationService accepts a missing one
                 // deliberately — but the column is NOT NULL and both the entity and the migration
-                // describe it as the type that was validated. Recording the constant is what makes
-                // all three agree, and removes the null path rather than defending against it.
-                FileValidationService.PDF_CONTENT_TYPE,
+                // describe it as the type that was validated. Asking the validator for the type it
+                // accepted is what makes all three agree, and removes the null path rather than
+                // defending against it.
+                fileValidationService.acceptedContentType(),
                 content.length,
-                checksumSha256);
+                checksumSha256,
+                submittedAt);
 
         // Registered before the save, not after. A constraint violation is thrown by the save;
         // catching it here would cover that case but miss a failure at commit time, which happens
@@ -158,9 +187,10 @@ public class SubmissionService {
 
         // The creation entry (FR-15), in the same transaction as the row it describes. A history
         // that could be written separately is a history that can disagree with the submission it
-        // belongs to; writing both here means either both exist or neither does.
+        // belongs to; writing both here means either both exist or neither does — and passing
+        // submittedAt to both means they also agree about when.
         statusHistoryRepository.save(
-                SubmissionStatusHistory.creation(saved.getId(), student.id()));
+                SubmissionStatusHistory.creation(saved.getId(), student.id(), submittedAt));
 
         return saved;
     }
@@ -176,12 +206,21 @@ public class SubmissionService {
      * <p>The page is applied by the database rather than here, so the rows nobody will read are
      * never fetched. The owner is part of the query, so the page is a bound on a set that was
      * already scoped to this student and cannot widen it.
+     *
+     * <p>Returns {@link SubmissionSummary} rather than {@link Submission}: the list is rendered by a
+     * template, the entity must not reach one ({@code SubmissionSummary} says why), and every caller
+     * of this method was mapping the page itself before handing it to a view. Doing the projection
+     * here means it happens once, inside the transaction that read the rows, instead of in each
+     * controller — and the total the page carries is still the count of the whole list, which is
+     * what the pager needs.
      */
     @Transactional(readOnly = true)
-    public Page<Submission> listForStudent(UUID studentId, Pageable pageable) {
+    public Page<SubmissionSummary> listForStudent(UUID studentId, Pageable pageable) {
         Objects.requireNonNull(studentId, "studentId");
         Objects.requireNonNull(pageable, "pageable");
-        return submissionRepository.findByStudentIdOrderByCreatedAtDesc(studentId, pageable);
+        return submissionRepository
+                .findByStudentIdOrderByCreatedAtDesc(studentId, pageable)
+                .map(SubmissionSummary::from);
     }
 
     /**
@@ -202,16 +241,39 @@ public class SubmissionService {
     }
 
     /**
-     * One of the signed-in student's own submissions.
+     * One of the signed-in student's own submissions, as the detail page shows it.
+     *
+     * <p>A read model rather than the entity, for the reason {@link #listForStudent} gives, and
+     * because the controller that renders the page is the only caller this method has.
      *
      * @param studentId    the authenticated principal's identifier
      * @param submissionId the identifier from the URL
-     * @return the submission
      * @throws SubmissionNotFoundException if no such submission exists, or it belongs to somebody
      *                                     else — the two are deliberately the same answer
      */
     @Transactional(readOnly = true)
-    public Submission findForStudent(UUID studentId, UUID submissionId) {
+    public SubmissionDetail detailForStudent(UUID studentId, UUID submissionId) {
+        return SubmissionDetail.from(findForStudent(studentId, submissionId));
+    }
+
+    /**
+     * The ownership-scoped row lookup every student-side read is built on.
+     *
+     * <p><strong>Private, and the only query in this class that scopes by owner.</strong> The three
+     * public methods above and below it — the detail, the history, the download — differ in what
+     * they do with the row, not in how they decide the caller may have it, so they share one lookup
+     * rather than each writing the {@code WHERE student_id = ?} that must not be forgotten. Keeping
+     * it private is what makes that structural: there is no way to obtain a {@link Submission} for a
+     * student from outside this class, so the entity cannot be handed to a template by a caller that
+     * has not first gone through a method built on this one.
+     *
+     * <p>The owner is part of the query rather than a check after the load, so somebody else's
+     * submission is never read rather than read and refused.
+     *
+     * @throws SubmissionNotFoundException if no such submission exists, or it belongs to somebody
+     *                                     else
+     */
+    private Submission findForStudent(UUID studentId, UUID submissionId) {
         Objects.requireNonNull(studentId, "studentId");
         Objects.requireNonNull(submissionId, "submissionId");
         return submissionRepository.findByIdAndStudentId(submissionId, studentId)
@@ -227,12 +289,16 @@ public class SubmissionService {
      * directly by submission identifier would be the leak — the history rows carry no owner, so
      * they cannot defend themselves.
      *
+     * <p>Returns {@link SubmissionHistoryEntry} — a read model with no actor on it — rather than
+     * {@link SubmissionStatusHistory}, so the entity that carries {@code actorId} cannot reach a
+     * template that would render it.
+     *
      * @throws SubmissionNotFoundException if the submission is not this student's
      */
     @Transactional(readOnly = true)
-    public List<SubmissionStatusHistory> historyForStudent(UUID studentId, UUID submissionId) {
+    public List<SubmissionHistoryEntry> historyForStudent(UUID studentId, UUID submissionId) {
         findForStudent(studentId, submissionId);
-        return statusHistoryRepository.findBySubmissionIdOrderByCreatedAtAsc(submissionId);
+        return historyFor(submissionId);
     }
 
     /**
@@ -269,21 +335,43 @@ public class SubmissionService {
      *
      * <p>The status is fixed here rather than passed in, so a caller cannot ask this method for
      * decided work and page through it as though it were a queue.
+     *
+     * <p>Returns read models for the same reason {@link #listForStudent} does, which is also why
+     * {@code ReviewService.queue} is a delegation rather than a projection.
      */
     @Transactional(readOnly = true)
-    public Page<Submission> listAwaitingReview(Pageable pageable) {
+    public Page<SubmissionSummary> listAwaitingReview(Pageable pageable) {
         Objects.requireNonNull(pageable, "pageable");
         return submissionRepository
-                .findByStatusOrderByCreatedAtAsc(SubmissionStatus.SUBMITTED, pageable);
+                .findByStatusOrderByCreatedAtAsc(SubmissionStatus.SUBMITTED, pageable)
+                .map(SubmissionSummary::from);
     }
 
     /**
-     * Any submission, for a reviewer (FR-17).
+     * Any submission, as a reviewer sees it (FR-17).
+     *
+     * <p>The mirror of {@link #detailForStudent}, and different from it in exactly one way: there is
+     * no owner in the query, because a reviewer is authorised by role at the route rather than by
+     * holding the row. See the section note above these methods.
      *
      * @throws SubmissionNotFoundException if no submission has that identifier
      */
     @Transactional(readOnly = true)
-    public Submission findForReview(UUID submissionId) {
+    public SubmissionDetail detailForReview(UUID submissionId) {
+        return SubmissionDetail.from(findForReview(submissionId));
+    }
+
+    /**
+     * The unscoped row lookup the reviewer's reads are built on.
+     *
+     * <p>Private, for the same structural reason as {@link #findForStudent}: the methods that need a
+     * {@link Submission} — including {@link #recordDecision}, which has to mutate one — are all in
+     * this class, and nothing outside it should be able to obtain a submission without going
+     * through a method that has stated what it does with it.
+     *
+     * @throws SubmissionNotFoundException if no submission has that identifier
+     */
+    private Submission findForReview(UUID submissionId) {
         Objects.requireNonNull(submissionId, "submissionId");
         return submissionRepository.findById(submissionId)
                 .orElseThrow(SubmissionNotFoundException::forRequestedSubmission);
@@ -291,9 +379,23 @@ public class SubmissionService {
 
     /** Any submission's status history, for a reviewer. */
     @Transactional(readOnly = true)
-    public List<SubmissionStatusHistory> historyForReview(UUID submissionId) {
+    public List<SubmissionHistoryEntry> historyForReview(UUID submissionId) {
         findForReview(submissionId);
-        return statusHistoryRepository.findBySubmissionIdOrderByCreatedAtAsc(submissionId);
+        return historyFor(submissionId);
+    }
+
+    /**
+     * One submission's transitions, projected for a page.
+     *
+     * <p>The pair of reads every history method performs, in the order they must happen: the row is
+     * resolved first — which is where authorisation is decided, differently for each side — and only
+     * then the rows that hang off it are read. Shared so that the ordering cannot be established in
+     * one place and reversed in the other.
+     */
+    private List<SubmissionHistoryEntry> historyFor(UUID submissionId) {
+        return statusHistoryRepository.findBySubmissionIdOrderByCreatedAtAsc(submissionId).stream()
+                .map(SubmissionHistoryEntry::from)
+                .toList();
     }
 
     /** Any submission's file, for a reviewer to read before deciding (FR-17). */
@@ -334,40 +436,55 @@ public class SubmissionService {
      * translates that into an {@code ObjectOptimisticLockingFailureException}. The controller turns
      * it into a message. Nobody's decision is silently overwritten.
      *
+     * <p>Nothing is returned. A decision is terminal (FR-20), so the decided state can only be
+     * re-read and never acted on again, and the caller that used to take the row — the reviewer's
+     * controller — discarded it. Returning something no caller uses invites a caller to treat the
+     * in-transaction instance as authoritative after the transaction has closed.
+     *
      * @param reviewerId   the deciding reviewer, from the authenticated principal
      * @param submissionId the submission to decide
      * @param outcome      {@code APPROVED} or {@code REJECTED}
      * @param note         the reviewer's comment; required for a rejection, {@code null} otherwise
-     * @return the decided submission
      * @throws SubmissionNotFoundException        if no submission has that identifier
      * @throws SubmissionAlreadyDecidedException  if it has already been decided
+     * @throws IllegalArgumentException           if {@code outcome} is a status that is not a
+     *                                            decision, which is a defect in the caller rather
+     *                                            than something a reviewer can cause
      */
     @Transactional
-    public Submission recordDecision(UUID reviewerId, UUID submissionId,
-                                     SubmissionStatus outcome, String note) {
+    public void recordDecision(UUID reviewerId, UUID submissionId,
+                               SubmissionStatus outcome, String note) {
         Objects.requireNonNull(reviewerId, "reviewerId");
         Objects.requireNonNull(submissionId, "submissionId");
         Objects.requireNonNull(outcome, "outcome");
 
+        // SUBMITTED is a status but not a decision, and this is the vocabulary's own answer to
+        // "which statuses are decisions?" rather than a pair of literals restated here. It was
+        // previously a switch on the three constants, which meant the same rule existed in two
+        // places — this method and ReviewService — and would have had to be changed in both when a
+        // fourth status arrived. ReviewService refuses this first, with a sentence for the
+        // reviewer; this is the assertion underneath it, hence the exception rather than a
+        // rendered message.
+        if (!outcome.isDecision()) {
+            throw new IllegalArgumentException("A decision must be APPROVED or REJECTED.");
+        }
+
         Submission submission = findForReview(submissionId);
         SubmissionStatus previousStatus = submission.getStatus();
 
-        switch (outcome) {
-            case APPROVED -> submission.approve(reviewerId);
-            case REJECTED -> submission.reject(reviewerId, note);
-            // SUBMITTED is not a decision. It is rejected here rather than silently treated as a
-            // no-op, because a caller asking to "decide" a submission into SUBMITTED has a bug,
-            // and the service that owns the transition is the right place to say so.
-            case SUBMITTED -> throw new IllegalArgumentException(
-                    "A decision must be APPROVED or REJECTED.");
+        // One instant for the transition, used by the row's reviewed_at, its updated_at, and the
+        // history entry that records the same event. Read once, above the write.
+        Instant decidedAt = now();
+        if (outcome == SubmissionStatus.APPROVED) {
+            submission.approve(reviewerId, decidedAt);
+        } else {
+            submission.reject(reviewerId, note, decidedAt);
         }
 
-        Submission decided = submissionRepository.save(submission);
+        submissionRepository.save(submission);
 
         statusHistoryRepository.save(SubmissionStatusHistory.transition(
-                decided.getId(), reviewerId, previousStatus, outcome, note));
-
-        return decided;
+                submission.getId(), reviewerId, previousStatus, outcome, note, decidedAt));
     }
 
     /**

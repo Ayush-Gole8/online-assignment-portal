@@ -78,11 +78,17 @@ com.vit.assignmentportal
 │
 ├── common/                                 # shared kernel — value types, enums, exceptions ONLY
 │   ├── Role.java                           #   enum STUDENT, REVIEWER, ADMIN                     [EXISTS]
-│   ├── SubmissionStatus.java               #   enum SUBMITTED, APPROVED, REJECTED                 [EXISTS]
+│   ├── PortalException.java                #   base of this application's own refusals — the
+│   │                                       #   message contract, and NO HTTP status (that is web)  [EXISTS]
+│   ├── SubmissionStatus.java               #   enum SUBMITTED, APPROVED, REJECTED; isDecision()  [EXISTS]
 │   └── UuidToVarcharConverter.java         #   JPA converter pinning the UUID column mapping     [EXISTS]
 │
 ├── config/                                 # cross-cutting Spring configuration
-│   └── SecurityConfiguration.java          #   filter chain, CSRF, route rules, session           [EXISTS]
+│   ├── SecurityConfiguration.java          #   filter chain, CSRF, route rules, session           [EXISTS]
+│   ├── PortalExceptionHandler.java         #   the ONE place a failure becomes an HTTP response   [EXISTS]
+│   ├── CurrentUserModelAdvice.java         #   the `currentUser` attribute every page renders     [EXISTS]
+│   ├── RequestIdFilter.java                #   X-Request-ID → response header + logging context   [EXISTS]
+│   └── ClockConfiguration.java             #   the injectable Clock bean, fixed to UTC            [EXISTS]
 │
 ├── auth/                                   # feature: identity and roles
 │   ├── User.java                           #   @Entity → maps the `users` table                 [EXISTS]
@@ -112,7 +118,7 @@ com.vit.assignmentportal
 │   ├── SubmissionCounts.java               #   record: one count per status, plus a derived total [EXISTS]
 │   ├── SubmissionSummary.java              #   record, read model for the list                   [EXISTS]
 │   ├── SubmissionDetail.java               #   record, read model for the detail page            [EXISTS]
-│   ├── SubmissionTimestampFormat.java      #   package-private; UTC formatting for templates      [EXISTS]
+│   ├── SubmissionTimestampFormat.java      #   package-private; UTC→IST display formatting        [EXISTS]
 │   ├── InvalidSubmissionException.java     #   refusal with a message safe to render              [EXISTS]
 │   ├── SubmissionNotFoundException.java    #   404 — "not yours" and "not there" are one answer  [EXISTS]
 │   ├── SubmissionStatusHistory.java        #   @Entity, append-only                              [EXISTS]
@@ -137,12 +143,17 @@ com.vit.assignmentportal
 │       └── detail.html                     #   metadata, history, download, decision form        [EXISTS]
 │
 └── storage/                                # capability: file bytes on a volume
-    ├── StorageService.java                 #   store / load / delete by identifier               [EXISTS]
+    ├── StorageService.java                 #   store / load / delete by identifier; verifyWritable
+    │                                       #   answers the health check without leaving a file   [EXISTS]
     ├── StorageIdentifier.java              #   record — the generated name; path traversal cannot
     │                                       #   be represented at all                              [EXISTS]
     ├── StorageProperties.java              #   @ConfigurationProperties("app.storage")            [EXISTS]
+    ├── UploadProperties.java               #   @ConfigurationProperties("app.upload") — the size
+    │                                       #   limit and the accepted media type                   [EXISTS]
     ├── StorageException.java               #   a named I/O failure, for operators only            [EXISTS]
-    ├── FileValidationService.java          #   PDF-only, ≤ 10 MB, magic bytes, name normalising   [EXISTS]
+    ├── StorageHealthIndicator.java         #   Actuator: is the upload volume writable?           [EXISTS]
+    ├── FileValidationService.java          #   PDF only, at the configured limit; magic bytes,
+    │                                       #   display-name normalising                           [EXISTS]
     └── ChecksumService.java                #   SHA-256                                            [EXISTS]
 ```
 
@@ -197,9 +208,12 @@ src/test/java/com/vit/assignmentportal
 ├── MySqlIntegrationTest.java               # the shared Testcontainer base class                   [EXISTS]
 ├── ApplicationContextIT.java               # context, migrations, and every CHECK constraint       [EXISTS]
 ├── UiRenderingIT.java                      # the guarantees every page shares: no script, the
-│                                           #   vendored stylesheets, the role-aware navbar         [EXISTS]
+│                                           #   vendored stylesheets, the role-aware navbar, the
+│                                           #   request identifier, and the committed upload limits [EXISTS]
+├── config/                                 # PortalExceptionHandlerTest, RequestIdFilterTest         [EXISTS]
 ├── auth/                                   # PasswordEncoderTest, AuthenticationIT, AuthorizationIT [EXISTS]
-├── storage/                                # unit tests for the four storage classes               [EXISTS]
+├── storage/                                # unit tests for the file-storage classes, the bound
+│                                           #   upload settings, and the volume health indicator    [EXISTS]
 ├── submission/                             # upload, access-isolation, failure-handling, download,
 │                                           #   the two-reviewer concurrency IT, and the dashboard IT [EXISTS]
 └── review/                                 # ReviewWorkflowIT (MockMvc) and ReviewControllerTest     [EXISTS]
@@ -288,6 +302,13 @@ introduced purely for testability add indirection without buying anything.
 | "Decide whether a note is required for this outcome" | `review/ReviewService` | Decision *policy*, and only the reviewer feature has it |
 | "Move a submission from `SUBMITTED` to `APPROVED`" | `submission/SubmissionService` | The transition *mechanism*, and only the owner of the entity may perform it |
 | "Append a row to the status history" | `submission/SubmissionService` | Same transaction as the status change, so the same class orders both |
+| "Bind `UPLOAD_MAX_FILE_SIZE` and `UPLOAD_ALLOWED_CONTENT_TYPE`" | `storage/UploadProperties` | The same rule as `StorageProperties`: the *shape* of a capability's settings belongs to the capability — see below |
+| "Base type for this application's own refusals" | `common/PortalException` | Two features raise refusals and may not import one another, so the base has to sit below both — see below |
+| "Turn a refusal into a 404, a 409, or a 400" | `config/PortalExceptionHandler` | What a failure means *over HTTP* is a web concern. Each feature says what happened; one class says what that is |
+| "Give every request an identifier, in the response and in the log context" | `config/RequestIdFilter` | Cross-cutting: it runs ahead of the filter chain and knows nothing about any feature |
+| "Put the signed-in user on every page's model" | `config/CurrentUserModelAdvice` | A `@ControllerAdvice` over all of MVC. It resolves the principal through `auth/CurrentUserService`, so a controller no longer does |
+| "Ask what time it is" | the injected `java.time.Clock`, declared in `config/ClockConfiguration` | A JDK type, so injecting it is the library-bean case below — and it is declared in `config` because nothing owns it |
+| "Report whether the upload volume is writable" | `storage/StorageHealthIndicator` | A question about the capability's own infrastructure, answered through `StorageService` rather than by touching the file system itself |
 
 If a change does not fit any row above, that is a signal the package structure needs a
 deliberate decision — raise it rather than dropping the code somewhere convenient.
@@ -340,6 +361,78 @@ So `StorageProperties` lives in `storage`, and no `@EnableConfigurationPropertie
 stays in `config` because it genuinely configures the framework for the whole application, and
 because nothing depends on it.
 
+`storage/UploadProperties` is that second capability's settings, and it follows the pattern exactly:
+`@ConfigurationProperties(prefix = "app.upload")`, in the package that reads it, found by the same
+`@ConfigurationPropertiesScan`. It replaced three copies of the upload limit — a `private static
+final` in `FileValidationService`, a literal in `application.yml`, and a `CHECK` constraint — with one
+setting the environment reaches. The `CHECK` constraint deliberately stayed independent: it is the
+last line of defence for a row written by anything other than this application, so making it derive
+from the same value would remove the only check that does not share a source of truth with the code.
+
+**The application port is the one setting deliberately not bound this way.** It lives in
+`server.port` (`application.yml`), resolving from `APP_PORT`. `server.port` is Spring Boot's own
+namespace, read by the embedded container before any application bean exists; a
+`@ConfigurationProperties` record of this application's own would either duplicate that value or
+shadow it, and two sources for one setting is precisely the failure the upload limit was
+consolidated to remove. The rule being reached for — no scattered string-based property lookups —
+holds regardless: nothing in this codebase calls `environment.getProperty("server.port")`. The port
+is externalised, documented in `.env.example`, and read in exactly one place, which is Spring Boot's.
+
+### Where the failure vocabulary belongs
+
+The exception hierarchy has three layers, and each sits where §4's rules put it:
+
+- **The base** — `common/PortalException`. A subclass asserts that this application raised it and
+  that its message is safe to render verbatim. It holds no framework type, and it could not hold one:
+  `common` is the shared kernel, `Role`'s javadoc makes the same point about `GrantedAuthority`, and a
+  base two features must share cannot sit in either feature. That is why it carries no `HttpStatus`.
+- **The subclasses** — in the features that raise them. `InvalidSubmissionException`,
+  `SubmissionNotFoundException` and `SubmissionAlreadyDecidedException` in `submission`;
+  `InvalidReviewException` in `review`.
+- **The translation** — `config/PortalExceptionHandler`. One class, one screen, the whole vocabulary.
+
+The deliberate non-member is `storage/StorageException`. It extends `RuntimeException` and not
+`PortalException`, because membership means "the message is safe to render verbatim" and a storage
+message names a storage identifier so an operator can reconcile the volume against the table. That
+distinction is what lets one handler be safe with the former and refuse, structurally, to render the
+latter.
+
+Statuses used to be declared on the exceptions as `@ResponseStatus`. That put the mapping in three
+feature packages and the response in the framework, with no single place stating the vocabulary — and
+it made `submission` the owner of a decision about HTTP. Now a feature says *what happened* and
+`config` says *what that is over HTTP*. `SubmissionNotFoundException` is the clearest case: it still
+answers 404, and the class that says so is no longer the class that raises it.
+
+Authorization is deliberately **not** in the handler. Anonymous and role refusals are answered by
+Spring Security's filter chain, which runs before `DispatcherServlet`; nothing MVC-shaped ever sees
+them. Catching `AccessDeniedException` at that layer would add a second, weaker copy of a policy that
+is already enforced — and risks turning a 403 into a 500.
+
+### `config` grew, and did not grow into a dependency
+
+Before this pass `config` held one class, and rule 3 was easy to keep because there was almost
+nothing to keep. It now holds five, so it is worth restating what the rule permits, because one of
+the new edges looks like a violation and is not:
+
+- **`config` may depend on every feature.** `PortalExceptionHandler` imports `submission`, `review`
+  and `storage`; `CurrentUserModelAdvice` imports `auth`. That is the direction rule 3 states.
+- **No feature or capability may import `config`.** Nothing does. The edge that looks as though it
+  might is `SubmissionService` taking a `Clock`. `Clock` is `java.time.Clock` — a JDK type the feature
+  imports from no package of ours; what `config` contributes is the `@Bean` that supplies it. §6
+  already allows exactly this, in the same sentence that allows `UserService` to take a Spring
+  Security `PasswordEncoder`.
+
+That distinction is real and it has a cost, which is worth stating rather than glossing. A reader of
+`SubmissionService` alone cannot tell what its clock is — whether it is UTC, fixed, or the wall
+clock — because the answer is in `ClockConfiguration`. The alternative was worse: `Instant.now()`
+inside the entity hides the same fact and cannot be replaced in a test at all.
+
+`storage/StorageHealthIndicator` brings a Spring Boot type — `HealthIndicator` — into a capability.
+That is not a new kind of edge either: `StorageProperties` is a Spring annotation-bound record, and
+rule 2 is about dependencies between *our* packages, not about the framework. The indicator reaches
+the file system only through `StorageService.verifyWritable`, so the capability's boundary is intact;
+the class is an adapter, not a second implementation.
+
 ### Open item: where does the audit trail live?
 
 FR-24 requires an audit trail, and [`CLAUDE.md` §5](../../CLAUDE.md) names an `AuditService`.
@@ -363,6 +456,11 @@ dedicated `audit` capability package — exactly like `storage` — is the recom
       `config` is fine to inject — `UserService` takes a Spring Security `PasswordEncoder` — but
       the `config` package itself is never imported.
 - [ ] A capability declares its own `@ConfigurationProperties` rather than putting it in `config`.
+- [ ] A refusal is a `PortalException` subclass **only if** its message is safe to render verbatim.
+      A message written for an operator — one naming a path, an identifier, or a SQL state — is not a
+      member, and no handler may echo it.
+- [ ] A HTTP status is declared in `config/PortalExceptionHandler` and **not** as `@ResponseStatus` on
+      the exception, so the whole vocabulary is readable in one place.
 - [ ] A class another feature needs is reached through a service, or through the shared kernel —
       never by importing across features. `UuidToVarcharConverter` moved to `common` for exactly
       this reason: `submission` needed it and could not import it from `auth`.
