@@ -30,8 +30,9 @@ public final class TestCategories {
 
     /**
      * A real browser against a running deployment. Never run by {@code verify}; run only under the
-     * {@code e2e} profile. No test carries this tag yet — Selenium is not a dependency
-     * ({@code docs/testing/test-strategy.md} §7).
+     * {@code e2e} profile ({@code ./mvnw verify -Pe2e}). Carried by the classes in
+     * {@code com.vit.assignmentportal.e2e}, which drive Chrome through the portal's own pages —
+     * see {@code docs/testing/e2e-testing.md}.
      */
     public static final String E2E = "e2e";
 
