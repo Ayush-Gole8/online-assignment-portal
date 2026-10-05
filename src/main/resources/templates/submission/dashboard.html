@@ -21,6 +21,10 @@
     currentUser        CurrentUserView          — for the navigation fragment
     counts             SubmissionCounts
     recentSubmissions  Page<SubmissionSummary>  — the most recent few
+
+  `id="student-dashboard"` names this page for the browser suite, so "the dashboard has
+  loaded" is asked of the document instead of being inferred from the word "Dashboard"
+  appearing anywhere in its title.
 */-->
 <html xmlns:th="http://www.thymeleaf.org" lang="en"
       th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
@@ -29,7 +33,7 @@
 </head>
 <body>
 
-<section>
+<section id="student-dashboard">
     <h1 class="h3">Your coursework</h1>
     <p class="text-body-secondary" th:text="${'Signed in as ' + currentUser.email}">
         Signed in as student@example.com

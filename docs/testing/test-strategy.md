@@ -18,7 +18,7 @@ The pyramid from `strategy.md` §2, holding its shape against the code that curr
 | --- | --- | --- | --- | --- | --- |
 | Unit | `*Test` | `unit` | Surefire | `test` | 17 |
 | Integration | `*IT` | `integration` | Failsafe | `integration-test`, `verify` | 11 |
-| End-to-end | `*E2E` | `e2e` | Failsafe (profile) | `verify -Pe2e` | 0 — see §7 |
+| End-to-end | `*E2E` | `e2e` | Failsafe (profile) | `verify -Pe2e` | 2 |
 
 Two mechanisms select a layer, and they are deliberately redundant:
 
@@ -137,13 +137,19 @@ one that loses a test is unacceptable, the one that skips a phase is visible.
 # Integration tests only — needs a running Docker daemon for Testcontainers
 ./mvnw failsafe:integration-test
 
-# End-to-end tests only — needs a running deployment and a browser
+# End-to-end tests only — drives an already-running deployment (see the script below)
 ./mvnw clean verify -Pe2e
 ```
 
 On Windows PowerShell or `cmd.exe`, use `mvnw.cmd` (`.\mvnw.cmd clean verify`). The wrapper needs
 nothing on `PATH`. `clean verify` requires Docker because the integration tests start a real
 MySQL 8.4 container (`strategy.md` §3.2, [ADR-003](../adr/ADR-003-mysql-system-of-record.md)).
+
+The browser suite starts nothing itself, so the reproducible command is the script that creates and
+destroys the environment it runs against — `scripts\dev\run-e2e.cmd`. Its stage order, the six
+scripts it calls and the reports it publishes are in
+[`ci-quality-gates.md`](ci-quality-gates.md); the suite itself is
+[`e2e-testing.md`](e2e-testing.md).
 
 ## 6. What each layer proves today
 
@@ -189,9 +195,11 @@ The intent is in `strategy.md` §3. This is where the suite currently stands aga
 
 Honest statement of what this suite does not yet do:
 
-- **No end-to-end tests.** Selenium is not a dependency, no `*E2E` class exists, and the `e2e`
-  profile is the mechanism and not yet the evidence. This is the Milestone 5 work
-  (`CLAUDE.md` §13).
+- **Two end-to-end classes, unproven.** `StudentWorkflowE2E` and `ReviewerWorkflowE2E` exist, are
+  tagged `e2e`, and drive a deployment that the pipeline starts for them
+  ([e2e-testing.md](e2e-testing.md)). What is missing is not the code but the run: no
+  `clean verify -Pe2e` has been executed, so every claim about them is a reading of the source
+  (`CLAUDE.md` §11, §13).
 - **No captured evidence.** `docs/evidence/` holds no test output for any milestone, and the
   last recorded green `clean verify` predates Milestones 3 and 4.
 - **The audit trail is untested because it does not exist** (FR-24): no `AuditService`, no

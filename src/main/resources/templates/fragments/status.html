@@ -16,6 +16,12 @@
 
   The text is the enum name itself, so the badge reads SUBMITTED / APPROVED / REJECTED —
   the same vocabulary the database stores and the route rules use.
+
+  `data-status` carries the same value as an attribute, because the text is not enough to
+  identify the badge. This fragment repeats once per row in a table, so it cannot carry a
+  fixed id — but a reader that finds the badge inside a row needs to know WHICH outcome it
+  is without depending on the CSS class that happens to colour it. The class is styling;
+  `data-status` is the state, and the browser suite reads the state.
 */-->
 <html xmlns:th="http://www.thymeleaf.org" lang="en">
 <head>
@@ -27,6 +33,7 @@
 <span th:fragment="badge(status)"
       class="badge status"
       th:classappend="${'status-' + #strings.toLowerCase(status.name())}"
+      th:attr="data-status=${status.name()}"
       th:text="${status}">SUBMITTED</span>
 
 </body>

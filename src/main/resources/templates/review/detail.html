@@ -26,6 +26,9 @@
     error        String                   — a flash attribute after a refused decision
     note         String                   — a flash attribute: the reason, handed back on refusal
     decided      SubmissionStatus         — a flash attribute after a recorded decision
+
+  `id="review-detail"` names this page for the browser suite — see submission/detail.html
+  for why a document states what it is rather than being recognised by its URL.
 */-->
 <html xmlns:th="http://www.thymeleaf.org" lang="en"
       th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
@@ -34,7 +37,7 @@
 </head>
 <body>
 
-<section>
+<section id="review-detail">
 
     <!--/* The recorded outcome, or the refusal, as a flash attribute: present once after the
          redirect, gone on a refresh. `decided` and `error` are never both set — the

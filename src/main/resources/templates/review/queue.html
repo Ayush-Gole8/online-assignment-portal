@@ -20,6 +20,10 @@
   Model attributes:
     currentUser  CurrentUserView          — for the navigation fragment
     submissions  Page<SubmissionSummary>
+
+  `id="review-queue"` names this page for the browser suite, so "the queue has loaded" is
+  asserted against the queue rather than against the word "Review queue" appearing in the
+  document title — which the reviewer detail page's own title also contains.
 */-->
 <html xmlns:th="http://www.thymeleaf.org" lang="en"
       th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
@@ -28,7 +32,7 @@
 </head>
 <body>
 
-<section>
+<section id="review-queue">
     <h1 class="h3">Review queue</h1>
     <p class="text-body-secondary">Submissions waiting for a decision, longest waiting first.</p>
 

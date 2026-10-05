@@ -24,9 +24,13 @@ class StudentWorkflowE2E extends BaseE2ETest {
         new StudentDashboardPage(driver).navigateToUpload(getBaseUrl());
 
         File pdf = createDummyPdf("valid-submission");
-        new SubmissionPage(driver).fillAndSubmit("My First E2E Submission", "E2E101", pdf);
 
-        SubmissionDetailsPage detailsPage = new SubmissionDetailsPage(driver);
+        // Returns the stored submission's own page, having waited for it. There is nothing left to
+        // poll for here: if the upload had been refused, this would have failed with the sentence
+        // the form showed rather than handing back a page that never rendered.
+        SubmissionDetailsPage detailsPage =
+                new SubmissionPage(driver).submitValidPdf("My First E2E Submission", "E2E101", pdf);
+
         assertThat(detailsPage.isLoaded()).isTrue();
         assertThat(detailsPage.getStatus()).isEqualTo("SUBMITTED");
     }
@@ -37,12 +41,18 @@ class StudentWorkflowE2E extends BaseE2ETest {
 
         new StudentDashboardPage(driver).navigateToUpload(getBaseUrl());
 
-        // File has .pdf extension (passes Chrome's accept= attribute) but plain-text
-        // content that fails the server's magic-byte check.
+        // The file has a .pdf extension (so Chrome's accept= attribute passes it) and plain-text
+        // content, which fails the server's magic-byte check. The lesson of this test is that the
+        // client-side filter is a convenience and not a control: the browser let it through and the
+        // server refused it (CLAUDE.md §7 rule 4).
         File disguisedFile = createDummyTextFile("invalid-submission");
-        new SubmissionPage(driver).fillAndSubmit("Invalid File Submission", "E2E101", disguisedFile);
 
-        assertThat(new SubmissionPage(driver).getErrorMessage())
-                .isEqualTo("That file is not a valid PDF.");
+        // Waits for the refusal to be rendered under the file input and returns it. Asserting on
+        // the sentence, not merely on the presence of an error: "refused" and "refused for the
+        // right reason" are different claims.
+        String refusal = new SubmissionPage(driver)
+                .submitPdfExpectingRefusal("Invalid File Submission", "E2E101", disguisedFile);
+
+        assertThat(refusal).isEqualTo("That file is not a valid PDF.");
     }
 }

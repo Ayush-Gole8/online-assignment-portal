@@ -319,17 +319,23 @@
 
   <profiles>
     <!--
-      The explicit way to run the end-to-end suite later: ./mvnw clean verify -Pe2e
+      The explicit way to run the end-to-end suite: ./mvnw clean verify -Pe2e
 
-      Selenium is not a dependency yet and no *E2E test exists, so this profile is the
-      mechanism and not yet the evidence for anything. It is a separate profile because the
-      browser suite needs a running deployment and takes minutes rather than seconds
-      (docs/testing/strategy.md §3.3), so it must never be something a plain `verify` can
-      start by accident — the profile has to be named, and naming it is the acknowledgement
-      that a browser and a live server are wanted.
+      It is a separate profile because the browser suite drives a running deployment and
+      takes minutes rather than seconds (docs/testing/strategy.md §3.3), so it must never be
+      something a plain `verify` can start by accident — the profile has to be named, and
+      naming it is the acknowledgement that a browser and a live server are wanted.
 
-      `failIfNoTests` is false so the profile is inert until the first *E2E test lands,
-      rather than turning a pipeline stage red for a test nobody has written yet.
+      The execution is named (`e2e-tests`) so that it can be run alone:
+
+        ./mvnw -Pe2e test-compile failsafe:integration-test@e2e-tests failsafe:verify@e2e-tests
+
+      A bare `verify -Pe2e` also re-runs the integration phase, because the plugin-level
+      execution is still bound to the same goals; naming this execution runs the browser
+      suite by itself, which is what the pipeline's Selenium stage does
+      (docs/testing/ci-quality-gates.md §3).
+
+      `failIfNoTests` is false so an empty browser suite is not a red pipeline stage.
     -->
     <profile>
       <id>e2e</id>
