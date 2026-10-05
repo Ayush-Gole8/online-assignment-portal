@@ -6,7 +6,6 @@ import com.vit.assignmentportal.e2e.pages.LoginPage;
 import com.vit.assignmentportal.e2e.pages.ReviewerDetailsPage;
 import com.vit.assignmentportal.e2e.pages.ReviewerQueuePage;
 import com.vit.assignmentportal.e2e.pages.StudentDashboardPage;
-import com.vit.assignmentportal.e2e.pages.SubmissionDetailsPage;
 import com.vit.assignmentportal.e2e.pages.SubmissionPage;
 import com.vit.assignmentportal.support.TestCategories;
 import java.io.File;
@@ -55,8 +54,14 @@ class ReviewerWorkflowE2E extends BaseE2ETest {
     // -------------------------------------------------------------------------
 
     /**
-     * Logs in as the student, submits a valid PDF with the given title, confirms
-     * the detail page is reached, then logs out so the test can continue as the reviewer.
+     * Logs in as the student, submits a valid PDF with the given title, then logs out so the test
+     * can continue as the reviewer.
+     *
+     * <p>Uses {@link SubmissionPage#submitValidPdf}, the same method the student's own journey test
+     * uses. The reviewer's tests need a submission to decide, and the only honest way to get one is
+     * to make one the way a student does — through the browser, through the form. A second, private
+     * submission path here would be a second definition of "a submission exists", and it would drift
+     * from the first.
      */
     private void createSubmissionAsStudent(String title) throws Exception {
         new LoginPage(driver, getBaseUrl()).loginAs(STUDENT_EMAIL, PASSWORD);
@@ -64,9 +69,7 @@ class ReviewerWorkflowE2E extends BaseE2ETest {
         new StudentDashboardPage(driver).navigateToUpload(getBaseUrl());
 
         File pdf = createDummyPdf("reviewer-test");
-        new SubmissionPage(driver).fillAndSubmit(title, "REV101", pdf);
-
-        assertThat(new SubmissionDetailsPage(driver).isLoaded()).isTrue();
+        new SubmissionPage(driver).submitValidPdf(title, "REV101", pdf);
 
         logout();
     }

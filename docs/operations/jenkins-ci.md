@@ -2,7 +2,9 @@
 
 **Status:** The pipeline is committed and **has not been executed on a Jenkins agent**. Every
 statement below describes the definition, not an observed run.
-**Related:** [CLAUDE.md §9](../../CLAUDE.md) · [Contribution workflow](../../CONTRIBUTING.md) · [Test strategy](../testing/strategy.md) · [Toolchain](toolchain.md)
+**Related:** [CI quality gates](../testing/ci-quality-gates.md) · [CLAUDE.md §9](../../CLAUDE.md) ·
+[Contribution workflow](../../CONTRIBUTING.md) · [Test strategy](../testing/strategy.md) ·
+[E2E testing](../testing/e2e-testing.md) · [Toolchain](toolchain.md)
 
 ---
 
@@ -12,12 +14,15 @@ statement below describes the definition, not an observed run.
 It answers one question on every pull request: **does this revision build and pass its tests on a
 machine other than the author's?**
 
-The pipeline builds, tests and packages. It does **not** deploy the application and does **not**
-publish a container image — those stages arrive with the delivery-pipeline milestone, and building
-them now would ship a deployment path that has never seen a passing build
-([CLAUDE.md §13](../../CLAUDE.md)). What exists here is the first half of the pipeline in
+The pipeline builds, tests — including the Selenium suite, against a deployment it starts itself —
+and packages. It does **not** deploy the application and does **not** publish a container image:
+those stages exist and are gated, but their implementation arrives with the delivery-pipeline
+milestone ([CLAUDE.md §13](../../CLAUDE.md)). What exists here is the first half of the pipeline in
 [`system-overview.md`](../architecture/system-overview.md) §5: into Jenkins, through Maven, through
-the tests, out as a versioned artefact.
+the tests — unit, integration and browser — out as a versioned artefact.
+
+The gate those stages enforce is documented separately, because it is the part worth reading twice:
+[`ci-quality-gates.md`](../testing/ci-quality-gates.md).
 
 ## 2. The pipeline at a glance
 
@@ -25,23 +30,36 @@ the tests, out as a versioned artefact.
 | --- | --- | --- | --- |
 | **Checkout** | `checkout scm` | The exact revision under test is the one that was pushed | Yes |
 | **Validate** | `java -version`, `git --version`, `docker version`, `docker compose version` | The agent has the toolchain, and which versions they are | Yes |
-| **Unit Tests** | `.\mvnw.cmd -B clean test` | The fast suite — Surefire over `*Test`, tagged `unit` | Yes |
+| **Build** | `.\mvnw.cmd -B clean test-compile` | Both source sets compile | Yes |
+| **Unit Tests** | `.\mvnw.cmd -B test` | The fast suite — Surefire over `*Test`, tagged `unit` | Yes |
 | **Integration Tests** | `.\mvnw.cmd -B failsafe:integration-test failsafe:verify` | The `*IT` suite against a real MySQL 8.4 container | Yes |
-| **Package** | `.\mvnw.cmd -B package -DskipTests` | The executable Spring Boot JAR | Yes |
-| **Publish Test Reports** | `junit …` | Surefire and Failsafe XML are attached to the build | No — publishes |
-| **Archive Artifact** | `archiveArtifacts … fingerprint: true` | The JAR is retained and its checksum recorded | No — archives |
+| **Package** | `.\mvnw.cmd -B package -DskipTests` | The executable Spring Boot JAR — the artefact the next two stages use | Yes |
+| **Start Test Environment** | `scripts\ci\start-database.cmd`, `start-application.cmd`, `wait-for-health.cmd` | MySQL 8.4 is healthy, the packaged JAR is running, and it answers `/actuator/health` | Yes |
+| **Selenium E2E** | `scripts\ci\run-e2e.cmd` | A real browser completes the student and reviewer journeys against that deployment | Yes |
+| **Publish Reports and Screenshots** | `junit …`, `archiveArtifacts …` | Unit, integration and browser results, and the failure screenshots, attached to the build | No — publishes |
+| **Docker Build** | gated | Gated on a green build **and** the existence of a `Dockerfile`. Skipped today | Skipped when ungreen |
+| **Deployment** | gated | Gated on a green build **and** the existence of `ansible/` or `deploy/ansible/`. Not implemented | Skipped when ungreen |
+
+`post { always }` then stops the environment, collects diagnostics, publishes the reports a second
+time, archives the JAR and the diagnostics bundle, and cleans the workspace.
 
 The pipeline runs `clean verify`'s work spread across the stages above, rather than the single
 `.\mvnw.cmd -B clean verify` command, so that a failure is attributed to the layer that produced it.
 Both forms are equivalent in what they prove ([CLAUDE.md §10](../../CLAUDE.md)).
 
-### Why the test stages use `catchError`
+### The quality gate
 
-A test failure must fail the build — that is non-negotiable. But a build that fails *before* the
-reporting stages run leaves the failure with no report attached, which is the least useful red build
-there is. Wrapping each test stage in `catchError(buildResult: 'FAILURE', stageResult: 'FAILURE')`
-sets the build result to `FAILURE` immediately while allowing the pipeline to reach Publish Test
-Reports and Archive Artifact. The build is red; the reason for it is still there to read.
+Every stage from **Build** to **Selenium E2E** is wrapped in
+`catchError(buildResult: 'FAILURE', stageResult: 'FAILURE')`: a failure sets the build result
+immediately and lets the pipeline continue, so the reporting stage still runs and the report
+explaining the failure is attached to the build that failed.
+
+**Docker Build** and **Deployment** each carry
+`when { expression { currentBuild.currentResult == 'SUCCESS' } }`. A stage that failed has already
+made that expression false, so neither stage's steps are evaluated at all: no image is built, and
+nothing is deployed. The gate is structural, not conventional —
+[`ci-quality-gates.md`](../testing/ci-quality-gates.md) §1 states it in full, and
+[`defect-demonstration.md`](../evidence/defect-demonstration.md) is the drill that exercises it.
 
 ### Why `failsafe:integration-test` and `failsafe:verify` are both listed
 
@@ -63,7 +81,8 @@ An agent carrying that label must provide:
 | --- | --- | --- |
 | A **JDK 21** on `JAVA_HOME` | The build enforces `[21,22)` and fails immediately on the wrong JDK | [toolchain.md §2](toolchain.md) |
 | **Git** on `PATH` | `checkout scm` and the Validate stage | [toolchain.md §5](toolchain.md) |
-| A running **Docker Engine** with the **Compose v2** plugin | Testcontainers starts a MySQL 8.4 container for the integration suite; `clean verify` cannot pass without it | [toolchain.md §4](toolchain.md) |
+| A running **Docker Engine** with the **Compose v2** plugin | Testcontainers starts a MySQL 8.4 container for the integration suite, and the *Start Test Environment* stage starts another for the browser suite; the pipeline cannot pass without it | [toolchain.md §4](toolchain.md) |
+| **Google Chrome** | The browser suite drives it headlessly. Selenium Manager downloads the matching driver on first use, so Chrome itself must be installed and the agent needs network access to the driver repository | [toolchain.md §6](toolchain.md) |
 | The **Maven Wrapper** | Committed to the repository (Maven 3.9.16, `distributionType=only-script`), so no Maven install is required — but the agent needs network access to Maven Central on its first build to download Maven and the dependencies | [toolchain.md §2](toolchain.md) |
 
 `JAVA_HOME` is the JDK **root**, not its `bin` directory. This is the single most common cause of a
@@ -93,13 +112,25 @@ Jenkins itself needs the following plugins, all of which the stages above depend
 
 ## 5. Reports and artefacts
 
-- **Publish Test Reports** attaches the Surefire (`target/surefire-reports/*.xml`) and Failsafe
-  (`target/failsafe-reports/*.xml`) JUnit XML to the build, where Jenkins renders pass/fail history
-  and flaky-test trends. `allowEmptyResults: true` keeps the stage from failing when a suite
-  produced no report — that situation is already a red build.
-- **Archive Artifact** retains `target/*.jar` and fingerprints it. The Boot plugin's sidecar,
-  `*.jar.original`, is not matched by `*.jar`, so only the runnable JAR is archived. Fingerprinting
-  records its SHA-256 so this exact binary can be traced to any downstream job that consumes it.
+- **Publish Reports and Screenshots** attaches the Surefire (`target/surefire-reports/*.xml`) and
+  Failsafe (`target/failsafe-reports/*.xml`) JUnit XML — the browser suite writes into the Failsafe
+  directory too — to the build, where Jenkins renders pass/fail history and flaky-test trends.
+  `allowEmptyResults: true` keeps the stage from failing when a suite produced no report; that
+  situation is already a red build.
+- **E2E failure screenshots** (`target/e2e-artifacts/**`) are archived. One directory per failed
+  test, holding a screenshot, the server's page source, and the metadata that ties them to a test
+  method ([E2E testing](../testing/e2e-testing.md) §5). Nothing is written on a green run, which is
+  why the archive allows an empty result.
+- **The diagnostics bundle** (`target/ci-diagnostics/**`) is archived. The application's logs, the
+  failure artifacts and copies of the machine-readable reports in one directory, so a build
+  discarded by the log rotator still has its evidence somewhere.
+- **The runnable JAR** is archived and fingerprinted. The Boot plugin's sidecar, `*.jar.original`,
+  is not matched by `target/*.jar`, so only the runnable JAR is retained. Fingerprinting records its
+  SHA-256 so this exact binary can be traced to any downstream job that consumes it.
+
+The publishing is performed twice — in the stage, and again in `post { always }` — so that a failure
+before the pipeline reaches the stage still attaches whatever exists.
+[`ci-quality-gates.md`](../testing/ci-quality-gates.md) §4 has the full table.
 
 ## 6. Secrets
 
@@ -162,10 +193,9 @@ other ([CLAUDE.md §9](../../CLAUDE.md)).
 
 | Not present | Why |
 | --- | --- |
-| **Deploy** | The deployment, health-check and rollback stages are the delivery-pipeline milestone. A deploy step now would deploy code that has never had a green build. |
-| **Build or push a Docker image** | Same milestone. There is no `Dockerfile` and no registry configuration yet. |
-| **A Selenium stage** | Selenium is not a dependency and no `*E2E` test exists. The Maven `e2e` profile is wired and inert (`pom.xml`); the pipeline gains the stage when the suite does. |
-| **Coverage gates, notifications** | Not requested at this stage; adding them now would be a threshold with nothing behind it. |
+| **Deploy** | The stage exists and is gated, but its steps are not implemented. The deployment, health-check and rollback work is the delivery-pipeline milestone, and a deploy step now would deploy code that has never had a green build ([CLAUDE.md §13](../../CLAUDE.md)). |
+| **Build or push a Docker image** | The stage exists and is gated on a green build *and* on a `Dockerfile`. There is no `Dockerfile` yet, so the stage is skipped visibly rather than passing while doing nothing — and no registry is configured, which is deliberate: an image pushed by a pipeline holding registry credentials it has no business holding is an image that escapes review. |
+| **A coverage gate, notifications** | Not requested at this stage; adding them now would be a threshold with nothing behind it. |
 
 ## 10. Known gaps
 
@@ -175,3 +205,6 @@ other ([CLAUDE.md §9](../../CLAUDE.md)).
 | **Branch protection is unverified.** | A green Jenkins check that is not *required* in GitHub blocks nothing. | Configure the required check and confirm the evidence row "A pull request gates on CI". |
 | **No green build to demonstrate.** | The last recorded green `clean verify` is Milestone 2's ([`toolchain.md` §9](toolchain.md)). The pipeline inherits that gap — it cannot be shown to gate a passing revision until there is one. | Land the pending Milestone 4 fixes, run `clean verify` green, then run the pipeline on that revision. |
 | **The `develop`/`main` discrepancy above.** | Two documents name different protected branches. | Reconcile `CONTRIBUTING.md` (and this file) with [CLAUDE.md §9](../../CLAUDE.md), or supersede whichever is wrong, in a documentation change. |
+| **The environment scripts have not been run.** | `scripts\ci\*.cmd` are read, not executed. They are the difference between a stage that starts a real environment and one that reports a failure the first time it is tried. | Run the pipeline once and fix what the first run reports. `scripts\dev\run-e2e.cmd` runs the identical steps locally, which is the cheaper way to find the same problems. |
+| **The `@e2e-tests` Failsafe invocation is unverified.** | Naming a Failsafe execution with `@` is standard Maven, but this project has not executed it. A wrong execution id fails loudly and unambiguously (`Unknown execution id`), so the cost of being wrong is one red build. | The first pipeline run either passes the stage or names the execution it could not find. |
+| **The agent needs a browser.** | The browser suite drives Chrome through Selenium Manager, which downloads the matching driver on first use. The agent therefore needs Chrome installed (or the manager able to fetch it) and network access to the driver repository. | Record the Chrome version the first run used in [toolchain.md](toolchain.md), which currently marks the browser row unverified. |

@@ -31,12 +31,23 @@
   alert stays empty so the same message is not shown twice. When it does not — a file that
   is not a PDF, an unreadable upload — the alert carries it and no field is marked.
 
-  Model attributes:
+    Model attributes:
     currentUser  CurrentUserView  — for the navigation fragment
     error        String           — a flash attribute, present only after a refusal
     errorField   String           — which input the refusal is about, or null
     title        String           — a flash attribute, so a refusal does not discard
     courseCode   String             what the student typed
+
+  MARKS THE BROWSER SUITE DEPENDS ON.
+
+  `id="upload-form"` names the one form on this page. The submit button is reached as
+  `#upload-form button[type='submit']` rather than as `main form button[type='submit']`:
+  the layout owns the <main> element, so a selector anchored on it would break the day the
+  layout gains a second form — and it would be a selector about the layout rather than
+  about this page. The identifiers of the inputs (`title`, `courseCode`, `file`) are already
+  semantic and are what the labels point at; the per-field refusal is rendered with the id
+  `field + '-error'` by fragments/validation, so `#file-error` exists exactly when a
+  refusal is about the file.
 */-->
 <html xmlns:th="http://www.thymeleaf.org" lang="en"
       th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
@@ -61,7 +72,7 @@
 
         <div class="card">
             <div class="card-body p-4">
-                <form th:action="@{/submissions}" method="post" enctype="multipart/form-data">
+                <form id="upload-form" th:action="@{/submissions}" method="post" enctype="multipart/form-data">
 
                     <div class="mb-3">
                         <label for="title" class="form-label">Title</label>

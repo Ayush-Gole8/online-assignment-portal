@@ -25,6 +25,11 @@
     submission   SubmissionDetail
     history      List<SubmissionHistoryEntry>
     submitted    String                   — a flash attribute, present only after an upload
+
+  `id="submission-detail"` names this page for the browser suite. The alternative — waiting
+  for a URL shaped like a UUID — describes the address rather than the page, and cannot
+  tell "the submission page has rendered" from "a redirect went somewhere with a UUID in
+  it". A document that says what it is can be waited for on its own terms.
 */-->
 <html xmlns:th="http://www.thymeleaf.org" lang="en"
       th:replace="~{fragments/layout :: page(~{::title}, ~{::section})}">
@@ -33,12 +38,19 @@
 </head>
 <body>
 
-<section>
+<section id="submission-detail">
 
     <!--/* A flash attribute, so it appears once after the redirect from the upload and is
-         gone on a refresh. Reloading this page does not re-upload anything. */-->
+         gone on a refresh. Reloading this page does not re-upload anything.
+
+         `submitted != null ? ... : null` is not decoration. This page is reachable by a
+         plain GET — "Back to my submissions" leads here, and so does a bookmark — and on
+         that path there is no flash. Concatenating unconditionally renders the literal
+         sentence "null was submitted for review." above a submission the reader just
+         asked for, which is a page explaining itself with a Java null. review/detail.html
+         has guarded its own flash this way since it was written; this one had not. */-->
     <div th:replace="~{fragments/flash :: alert('success',
-            ${submitted} + ' was submitted for review.')}"></div>
+            ${submitted != null ? submitted + ' was submitted for review.' : null})}"></div>
 
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
         <div>

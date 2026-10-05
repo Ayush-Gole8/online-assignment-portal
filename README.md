@@ -148,8 +148,13 @@ GitHub → Pull Request / Review → Jenkins CI → Maven Build → Unit Tests
 ```
 
 Each stage is documented, and every stage that produces evidence stores it under
-[`docs/evidence/`](docs/evidence/). The pipeline itself is built in a later milestone; the
-required stages are fixed by [`docs/requirements/mvp.md`](docs/requirements/mvp.md).
+[`docs/evidence/`](docs/evidence/). The continuous-integration half — checkout through packaging,
+the unit, integration and Selenium suites, and the quality gate that stops a failed revision before
+it can be released — is committed as [`Jenkinsfile`](Jenkinsfile) and described in
+[`docs/operations/jenkins-ci.md`](docs/operations/jenkins-ci.md) and
+[`docs/testing/ci-quality-gates.md`](docs/testing/ci-quality-gates.md). The delivery half — the
+Docker image, the registry, provisioning, deployment and rollback — is built in a later milestone,
+and the required stages are fixed by [`docs/requirements/mvp.md`](docs/requirements/mvp.md).
 
 ## Repository layout
 
@@ -185,7 +190,9 @@ required stages are fixed by [`docs/requirements/mvp.md`](docs/requirements/mvp.
 │       ├── storage/              # unit tests: validation, checksums, paths, I/O
 │       ├── submission/           # upload, access-isolation, failure-handling,
 │       │                         #   and the two-reviewer concurrency IT
-│       └── review/               # reviewer workflow IT + decision-handler unit test
+│       ├── review/               # reviewer workflow IT + decision-handler unit test
+│       └── e2e/                  # Selenium: the browser journeys, the page objects,
+│                                 #   and the failure-artifact extension
 ├── docs/
 │   ├── requirements/             # What must be built (and what must not)
 │   ├── architecture/             # Structure, diagrams, data model
@@ -269,10 +276,12 @@ than an in-memory substitute, so the migration is exercised on the engine that s
 
 ## Next milestone readiness
 
-**Milestone 5 — the delivery pipeline.** The application now covers the MVP's functional scope: a
-student can submit and read a decision, and a reviewer can decide. The deliverable this repository
-actually exists to demonstrate is still absent — no `Dockerfile`, no `Jenkinsfile`, no Ansible
-playbooks, no Selenium suite, and no registry publication or rollback path.
+**Milestone 5 — the delivery pipeline.** The application covers the MVP's functional scope: a
+student can submit and read a decision, and a reviewer can decide. The continuous-integration half
+of the pipeline exists — [`Jenkinsfile`](Jenkinsfile) runs the build, the unit, integration and
+Selenium suites, a started test environment, and the quality gate that refuses to build an image
+from a failed revision. What is still absent is the delivery half: no `Dockerfile`, no Ansible
+playbooks, no registry publication, and no rollback path.
 
 The audit trail (FR-24), still outstanding from Milestone 2, is the one functional criterion not yet
 met and should either ride along with Milestone 5 or be explicitly deferred in an ADR.
@@ -358,7 +367,7 @@ As of 2026-10-02:
 | Authentication and route rules behave as documented | **Verified** by the recorded `AuthenticationIT` (11) and `AuthorizationIT` (14) |
 | `deploy/docker-compose.yml` brings MySQL up healthy | **Not run** — the tests use a Testcontainers MySQL rather than the Compose service |
 | The application serves `/actuator/health` | **Not run** |
-| A real browser can complete a workflow | **Not run** — Selenium is not a dependency yet |
+| A real browser can complete a workflow | **Not run** — the Selenium suite and the environment scripts that start the deployment it drives exist, but no browser run has been executed |
 
 Design intent is recorded and reviewable; behaviour counts as evidence only where a run is named
 above. [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine)

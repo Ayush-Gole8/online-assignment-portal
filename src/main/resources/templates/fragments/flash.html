@@ -27,6 +27,13 @@
   The message is always inserted with th:text, so anything it contains is escaped. No
   message in this application interpolates text a user supplied (CLAUDE.md §7 rule 11),
   but the template does not rely on that being true.
+
+  The id is `flash-success` / `flash-error` rather than a Bootstrap class, so that the
+  browser suite can wait for the alert as a thing the application defines. No page carries
+  two alerts of the same type: every caller renders at most one success and at most one
+  danger, so the id is unique in the document and a Selenium `#flash-error` is unambiguous.
+  A class would have been neither — `.alert-danger` is also on the rejection-reason
+  paragraph in review/detail.html, which is rendered for a different reason.
 */-->
 <html xmlns:th="http://www.thymeleaf.org" lang="en">
 <head>
@@ -37,6 +44,7 @@
 
 <div th:fragment="alert(type, message)"
      th:if="${message != null and !#strings.isEmpty(message)}"
+     th:id="${type == 'success' ? 'flash-success' : 'flash-error'}"
      class="alert"
      th:classappend="${type == 'success' ? 'alert-success' : 'alert-danger'}"
      th:attr="role=${type == 'success' ? 'status' : 'alert'}"
