@@ -5,10 +5,10 @@ rem ===========================================================================
 rem Wait until the application under test is serving.
 rem
 rem What this does
-rem   Polls the Actuator health endpoint until it answers 200, or until the
-rem   deadline passes. On timeout it prints the application's own log tail, so
-rem   the failure that explains the timeout is in the stage that timed out rather
-rem   than in a file nobody opened.
+rem   Polls the Actuator health endpoint until it reports UP, or until the deadline
+rem   passes. On timeout it prints the application's own log tail, so the failure
+rem   that explains the timeout is in the stage that timed out rather than in a
+rem   file nobody opened.
 rem
 rem Why the body is read, and not merely the status code
 rem   This script originally accepted any 200 from the port, on the reasoning that
@@ -44,7 +44,10 @@ call "%~dp0env.cmd"
 if not defined HEALTH_TIMEOUT_SECONDS set "HEALTH_TIMEOUT_SECONDS=120"
 if not defined HEALTH_POLL_SECONDS set "HEALTH_POLL_SECONDS=2"
 
-set "HEALTH_URL=http://localhost:%APP_PORT%/actuator/health"
+rem Overridable, so a caller that already knows the full URL — run-e2e.cmd, which
+rem may be aimed at a deployment this pipeline did not start — does not have to
+rem rebuild it from APP_PORT and be wrong when E2E_BASE_URL names a different host.
+if not defined HEALTH_URL set "HEALTH_URL=http://localhost:%APP_PORT%/actuator/health"
 
 echo [wait-for-health] Waiting up to %HEALTH_TIMEOUT_SECONDS%s for %HEALTH_URL%...
 
@@ -52,7 +55,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$deadline = (Get-Date).A
 
 if errorlevel 1 (
     echo [wait-for-health] FAILED: %HEALTH_URL% did not report a Spring health document with status UP within %HEALTH_TIMEOUT_SECONDS%s.
-    echo [wait-for-health] If another service owns port %APP_PORT%, the application never bound it and its log will look healthy.
+    echo [wait-for-health] If another service owns that address, the application never bound it and its log will look healthy.
     echo [wait-for-health] Check what is listening before reading the application log.
     if exist "target\ci-application.log" (
         echo [wait-for-health] Last 40 lines of target\ci-application.log:

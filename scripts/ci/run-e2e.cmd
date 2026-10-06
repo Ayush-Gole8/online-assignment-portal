@@ -41,6 +41,28 @@ rem The port comes from env.cmd; an explicit E2E_BASE_URL wins, for pointing the
 rem suite at a deployment this pipeline did not start.
 if not defined E2E_BASE_URL set "E2E_BASE_URL=http://localhost:%APP_PORT%"
 
+rem Prove a portal is actually there before Maven starts. The suite drives a
+rem deployment; it does not start one, and a run with nothing listening does not
+rem fail cleanly — the browser drives whatever *does* answer. That is not
+rem hypothetical: the first hand-run of this suite pointed at port 8080, Jenkins
+rem answered, and all four journeys failed with `no such element: #email` against
+rem Jenkins' own sign-in page. Five seconds here replaces four Chrome launches and
+rem a minute and a half of a failure that names the wrong thing.
+rem
+rem This reuses wait-for-health.cmd rather than re-implementing the check, with a
+rem short timeout and the URL taken from E2E_BASE_URL so a remote target is
+rem probed where it actually is.
+set "HEALTH_TIMEOUT_SECONDS=5"
+set "HEALTH_URL=%E2E_BASE_URL%/actuator/health"
+call "%~dp0wait-for-health.cmd"
+if errorlevel 1 (
+    echo [run-e2e] FAILED: no portal is answering at %E2E_BASE_URL%.
+    echo [run-e2e] The suite drives a deployment; it does not start one. For the whole
+    echo [run-e2e] lifecycle use scripts\dev\run-e2e.cmd, or start the environment first
+    echo [run-e2e] with start-database.cmd, start-application.cmd and wait-for-health.cmd.
+    exit /b 1
+)
+
 echo [run-e2e] Running the Selenium suite against %E2E_BASE_URL%...
 
 call .\mvnw.cmd -B -Pe2e test-compile failsafe:integration-test@e2e-tests failsafe:verify@e2e-tests
