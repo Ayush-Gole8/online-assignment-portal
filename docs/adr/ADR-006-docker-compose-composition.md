@@ -58,11 +58,39 @@ development is a different context: a developer runs the application on the host
 `./mvnw spring-boot:run`, so the host must be able to reach MySQL.
 
 `deploy/docker-compose.yml` therefore publishes the database port on **loopback only**
-(`127.0.0.1:${DB_PORT:-3306}:3306`). The decision is unchanged — the database remains absent
+(`127.0.0.1:${DB_PORT:-3306}:3306`) — as `compose.yaml` still does, that file having since been
+moved to the repository root. The decision is unchanged — the database remains absent
 from every other network interface, and the deployment composition continues to publish no
 database port at all.
 
 This is a clarification of scope, not a change to the decision.
+
+### The composition now exists (2026-10-06)
+
+The decision above was written before there was an application image, and
+`deploy/docker-compose.yml` held the `db` service alone for that reason: an `app` service has
+nothing to reference without a Dockerfile. The multi-stage `Dockerfile` now exists, so the file
+moved to **`compose.yaml` at the repository root** and declares both services as this decision
+describes — `app` and `db`, a private network, a named volume each (`app-uploads`, `mysql-data`),
+a healthcheck on both, and `restart: unless-stopped` on both.
+
+Three points where the implementation makes a decision this ADR left open, recorded here rather
+than left to be inferred from the file:
+
+- **"One committed Compose file" is now literally true.** The `db` definition was *moved* from
+  `deploy/docker-compose.yml` to `compose.yaml`, not copied, and the old file is deleted. Two files
+  each declaring a database is the drift this decision exists to prevent.
+- **The database port is published, on loopback only** — carried over unchanged from the local
+  composition, and still governed by the local-development clarification above. A deployment that
+  never runs the application from the host should delete the block; the file says so.
+- **The application port is published on loopback too**, on host port 8081 rather than 8080, because
+  Jenkins owns 8080 on the machine that runs this pipeline. The ADR says only the application port
+  is published; binding it to loopback is a narrower reading of that rule, not a wider one.
+
+**Images are still referenced by tag and not yet by immutable digest.** The decision requires a
+deployment to be traceable to a commit and the tag scheme supports that
+(`online-assignment-portal:<commit>`), but no registry publication exists yet, so nothing enforces
+it. `docs/operations/docker.md` §2.1 and §9 record both halves of that gap.
 
 ## Consequences
 

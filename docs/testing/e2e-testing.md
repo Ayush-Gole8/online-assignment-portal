@@ -23,7 +23,7 @@ request together themselves and a browser does not.
   pipeline's *Start Test Environment* stage in CI — starts the packaged JAR and waits for
   `/actuator/health` before the suite runs.
 - **MySQL 8.4 in a container**, started by `scripts\ci\start-database.cmd` from
-  `deploy/docker-compose.yml`. Docker must be running.
+  `compose.yaml`. Docker must be running.
 
 ### Why the suite no longer starts its own application
 
@@ -143,7 +143,7 @@ stage invoked them.
 ## 4. Test environment reproducibility
 
 - A run creates its own database and destroys it. `start-database.cmd` brings up MySQL 8.4 from
-  `deploy/docker-compose.yml`; `stop-environment.cmd` runs `down -v`, which drops the volume. A run
+  `compose.yaml`; `stop-environment.cmd` runs `down -v`, which drops the volume. A run
   therefore does not depend on the run before it, which matters because the suite creates real rows
   and their titles are only unique within a run.
 - Accounts are seeded by the application at startup, from the environment, and only if absent, so

@@ -265,10 +265,14 @@ every machine and every CI agent builds with the same one.
 ./mvnw verify -Pe2e
 
 # Start the local dependencies
-docker compose -f deploy/docker-compose.yml up -d
+docker compose up -d db
 
 # Run the application locally (reads .env / environment variables)
 ./mvnw spring-boot:run
+
+# Package the artefact into the production image, and run the whole stack
+./mvnw clean package -DskipTests
+docker compose up -d --build
 ```
 
 On Windows PowerShell or `cmd.exe`, use `mvnw.cmd`:
@@ -281,6 +285,10 @@ On Windows PowerShell or `cmd.exe`, use `mvnw.cmd`:
 `clean verify` requires Docker to be running: the integration test starts a MySQL 8.4
 container (docs/testing/strategy.md §3.2).
 
+The Dockerfile runs **no** Maven: it packages the artefact `./mvnw package` already produced, so
+`clean verify` is still the only build process in this repository (§1). The full container
+lifecycle is [`docs/operations/docker.md`](docs/operations/docker.md).
+
 > **Do not claim a command was run unless it was.** Report the real outcome, including
 > failures, and paste the relevant output.
 
@@ -289,6 +297,12 @@ container (docs/testing/strategy.md §3.2).
 **Milestone 4 — the reviewer decision, the status history, and file download are implemented. No
 suite later than Milestone 2's has yet run to green, so Milestones 3 and 4 are executed but
 unproven: the 2026-10-02 runs below are the first time any of this code has been exercised.**
+
+**Added on 2026-10-06, and unrun:** the container artefacts of Milestone 5 — `Dockerfile`,
+`compose.yaml`, `.dockerignore`, and `docs/operations/docker.md`. No `docker build` and no
+`docker compose up` has been executed. This is a deliberate divergence from §13's sequencing, taken
+on the repository owner's instruction and recorded there and in
+[`docs/operations/docker.md` §8](docs/operations/docker.md).
 
 The build *has* moved since Milestone 2, and three `mvn clean verify` runs on **2026-10-02** — one
 without Docker, two with — between them report where the project actually stands. They also found
@@ -372,7 +386,15 @@ it — which is also the first milestone whose tests exercise a state transition
 - `pom.xml` — Java 21, Spring Boot 4.1.1, pinned dependency set, enforcer rules.
 - **The Maven Wrapper**, pinned to Maven 3.9.16 with `distributionType=only-script`. `./mvnw` is
   the canonical build command of §10 and needs nothing on `PATH`.
-- `deploy/docker-compose.yml` — local MySQL 8.4 with a named volume and healthcheck.
+- `compose.yaml` — the running system: `app` + `db`, a private network, the `app-uploads` and
+  `mysql-data` volumes, health checks on both services, and explicit port publishing. It replaced
+  `deploy/docker-compose.yml`, which held the `db` definition alone while there was no application
+  image for an `app` service to reference; the definition was **moved rather than copied**, because
+  two files each declaring a database is the drift ADR-006 exists to prevent.
+- `Dockerfile` — the multi-stage production image. It packages the JAR `./mvnw package` produced and
+  runs no Maven, so it is not a second build process.
+- `.dockerignore` — admits exactly one file into the build context, the executable JAR.
+- `docs/operations/docker.md` — the image, the stack, and the container lifecycle.
 - `src/main/resources/application.yml` — externalised configuration, no secrets.
 
 **`auth/` — identity (Milestone 2).** `User` entity and repository, `UserService`, and a
@@ -429,8 +451,11 @@ exercises each constraint by inserting rows the service would never produce.
   different concern from *security* events.
 - **No resubmission.** A rejection is terminal in the MVP. Rejected work is not resubmitted, and
   nothing resets a submission to `SUBMITTED`.
-- **No `Dockerfile`, no `Jenkinsfile`, no Ansible playbooks, no pipeline stages.** The real
-  deliverable of this project — the pipeline — is still ahead.
+- **No registry, no Ansible playbooks, no deployment, no rollback path.** The continuous-integration
+  half of the pipeline now exists — `Jenkinsfile`, the Selenium suite, and a `Dockerfile` that
+  packages the JAR into an image. The *delivery* half is still ahead, and CLAUDE.md §13's
+  precondition for it is still unmet: no `clean verify` has been green since Milestone 2. The image
+  is **written, not built**; `docs/operations/docker.md` §8 lists what has not been run.
 - **No admin UI.** `ADMIN` exists as a role, gates `/admin/**`, and can review; no management
   screens ship.
 
@@ -514,9 +539,18 @@ tools they loaded, not the version of every tool listed in that document, so mos
 still marked *unverified* at this revision.
 
 **Milestone 5 — the delivery pipeline.** The application is now as complete as the MVP needs it to
-be; the deliverable this project actually exists to demonstrate is still absent. Milestone 5
-carries: a multi-stage `Dockerfile`; `Jenkinsfile` stages for build, unit, integration and Selenium
-E2E tests, image publication to a registry, Ansible provisioning and deployment, a health check,
-and a rollback path; the Selenium suite itself; and — if it is to be claimed — the FR-24 audit
-trail carried over above. Nothing here should be started before the Milestone 4 build is green,
-because a pipeline that has never seen a passing build has nothing to demonstrate.
+be. The continuous-integration half of the pipeline exists: `Jenkinsfile` stages for build, unit,
+integration and Selenium E2E tests, and a multi-stage `Dockerfile` that packages the Maven artefact
+into a production image. What Milestone 5 still carries: image publication to a registry, Ansible
+provisioning and deployment, a health check after it, and a rollback path; and — if it is to be
+claimed — the FR-24 audit trail carried over above.
+
+**Nothing in Milestone 5 should be trusted before the Milestone 4 build is green**, and that
+precondition is still unmet. The `Dockerfile` and `compose.yaml` were added ahead of it on the
+repository owner's instruction, which is a deliberate divergence from the sequencing this section
+describes. The consequence is recorded rather than glossed: the image has never been built, the
+stack has never been started, and every claim about either is *written, not proven*
+([`docs/operations/docker.md` §8](docs/operations/docker.md) lists them one by one). Creating the
+`Dockerfile` also satisfies the second guard on the `Jenkinsfile`'s `Docker Build` stage, so that
+stage now runs on a green build instead of skipping — the `Deployment` stage still skips, because no
+Ansible assets exist.

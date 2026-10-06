@@ -177,7 +177,9 @@ changes, so the rerun differs from the failing run in exactly one attribute.
 
 ```
 [Pipeline] { (Docker Build)
-Stage "Docker Build" skipped due to when conditional
+[Pipeline] bat
++ docker build -t online-assignment-portal:… .
+Successfully tagged online-assignment-portal:…
 [Pipeline] } //stage
 [Pipeline] { (Deployment)
 Stage "Deployment" skipped due to when conditional
@@ -185,15 +187,25 @@ Stage "Deployment" skipped due to when conditional
 Finished: SUCCESS
 ```
 
-Docker Build is skipped here for the *other* reason — no `Dockerfile` exists yet, and the stage is
-additionally guarded by `fileExists('Dockerfile')` ([CLAUDE.md §13](../../CLAUDE.md) withholds
-Milestone 5 until a build is green). The two skips are distinguishable in the log only by which
-`when` failed, which is worth knowing before reading a skip as a gate closure.
+Docker Build **runs** on the rerun, and that is a change of behaviour introduced on 2026-10-06 by a
+change to the repository rather than to this drill. The stage carries two guards: the build must be
+green, **and** a `Dockerfile` must exist. Until the Dockerfile was added the second guard was false,
+so a green build still skipped the stage — which made it possible to read a `Docker Build` skip as
+"the gate closed" when it actually meant "nothing to build". That ambiguity is now gone: on this
+revision a skipped Docker Build means the first guard failed, and therefore means the build was red.
 
-**When Milestone 5 lands**, the second rerun is the one that completes the drill: green build →
-Docker Build **runs** → Deployment **runs**. The gate is then demonstrated in both directions —
-it blocks a bad revision and admits a good one. Until then the drill demonstrates the blocking
-direction, which is the one that protects anything.
+Deployment is still skipped, because its second guard asks for `ansible/` or `deploy/ansible/`,
+neither of which exists.
+
+**The image this now builds has never been built anywhere else, and CLAUDE.md §13's precondition is
+unmet** — no `clean verify` has been green since Milestone 2. The Docker Build stage therefore
+reports a successful packaging step, not a working image; what has and has not been run is listed in
+[docker.md §8](../operations/docker.md).
+
+**When the deployment work lands**, the drill's second half completes: green build → Docker Build
+**runs** → Deployment **runs**, and the gate is demonstrated in both directions — it blocks a bad
+revision *and* admits a good one. The blocking direction, which is the one that protects anything,
+is demonstrated by §4 today.
 
 ## 6. Rules for running this drill
 
@@ -216,5 +228,6 @@ direction, which is the one that protects anything.
 | --- | --- |
 | **Never performed.** Every output above is expected, not observed. | Run §3–§5 once on a real agent. |
 | **The upstream stages may not pass with the defect planted.** The claim that unit and integration tests do not read `enctype` is a reading of the suite, not a result — no test file mentions `enctype` or `multipart/form-data`, and `SubmissionUploadIT` builds its own multipart request. If a lower layer does catch it, the drill still proves the gate holds; it simply stops at an earlier stage, and a defect closer to the browser must be chosen. | The first run reports which stage stopped. |
-| **Docker Build and Deployment always skip today.** | Milestone 5's `Dockerfile` and provisioning, once there is a green build to deploy. |
-| **The gate has not been shown to admit a good revision.** | The second half of §5, which needs the Dockerfile. |
+| **The Dockerfile now exists, so §4.3's expected output is stale.** The `Docker Build` skip shown there was correct when there was nothing to build; a rerun today would show the stage running. | Re-running §3–§5 and replacing the expected blocks with the real console, which is what §6 already requires. |
+| **Deployment always skips today.** The Dockerfile exists as of 2026-10-06, so Docker Build now runs on a green build; Deployment still has no Ansible assets. | Milestone 5's provisioning, once there is a green build to deploy. |
+| **The gate has not been shown to admit a good revision.** | The second half of §5, which needs a green build — not the Dockerfile, which now exists. |

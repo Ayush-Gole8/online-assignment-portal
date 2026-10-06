@@ -28,9 +28,12 @@ The application is deliberately modest. The engineering objective of this reposi
 > error page's notes naming `BasicErrorController` and `SecurityConfiguration`. **The last fully
 > green build is still Milestone 2's.**
 >
-> **Not yet present — deliberately:** the audit trail (FR-24), any form of resubmission, an admin UI
-> beyond the role gate, and the delivery pipeline itself — no `Dockerfile`, no `Jenkinsfile`, no
-> Ansible playbook. The pipeline this repository exists to demonstrate is still ahead.
+> **Not yet present — deliberately:** the audit trail (FR-24), any form of resubmission, and an
+> admin UI beyond the role gate. The *continuous-integration* half of the pipeline now exists — a
+> [`Jenkinsfile`](Jenkinsfile), a Selenium suite, and a [`Dockerfile`](Dockerfile) that packages the
+> JAR into a production image. What is still absent is the *delivery* half: no registry publication,
+> no Ansible provisioning, no deployment and no rollback path. **Nothing in that half has run to
+> green, and the image has never been built.**
 >
 > See [Unverified claims](#unverified-claims) before relying on any statement below.
 >
@@ -165,6 +168,11 @@ and the required stages are fixed by [`docs/requirements/mvp.md`](docs/requireme
 ├── CONTRIBUTING.md               # Branch, commit, and review workflow
 ├── SECURITY.md                   # Threat model, secret handling, reporting
 ├── pom.xml                       # Java 21, Spring Boot 4.1.1, pinned dependencies
+├── Dockerfile                    # Multi-stage image: packages the JAR Maven built,
+│                                 #   runs it as a non-root user on a Temurin 21 JRE
+├── compose.yaml                  # The running system: the application and MySQL 8.4,
+│                                 #   two named volumes, health checks, explicit ports
+├── .dockerignore                 # admits one file into the build context: the JAR
 ├── mvnw / mvnw.cmd               # Maven Wrapper — the canonical build mechanism
 │                                 #   pins Maven 3.9.16; no local Maven needed
 ├── .editorconfig / .gitattributes / .gitignore / .env.example / cspell.json
@@ -198,11 +206,9 @@ and the required stages are fixed by [`docs/requirements/mvp.md`](docs/requireme
 │   ├── architecture/             # Structure, diagrams, data model
 │   ├── adr/                      # Architecture Decision Records
 │   ├── testing/                  # Test strategy and the test pyramid
-│   ├── operations/               # Toolchain, runbooks, deployment
+│   ├── operations/               # Toolchain, CI, Docker, runbooks
 │   └── evidence/                 # Captured proof per pipeline stage
-├── deploy/                       # Docker Compose and deployment assets
-├── ansible/                      # Provisioning roles and inventories
-└── scripts/                      # ci/ dev/ ops/ helper scripts
+└── scripts/                      # ci/ dev/ helper scripts
 ```
 
 ## Documentation map
@@ -217,6 +223,7 @@ and the required stages are fixed by [`docs/requirements/mvp.md`](docs/requireme
 | [`docs/adr/`](docs/adr/) | Why each architectural decision was made |
 | [`docs/testing/strategy.md`](docs/testing/strategy.md) | What is tested at each layer |
 | [`docs/operations/toolchain.md`](docs/operations/toolchain.md) | Required tool versions |
+| [`docs/operations/docker.md`](docs/operations/docker.md) | The production image, the Compose stack, and the container lifecycle |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to propose a change |
 | [`SECURITY.md`](SECURITY.md) | How uploads, secrets, and vulnerabilities are handled |
 
@@ -251,7 +258,7 @@ wrapper downloads it.
 cp .env.example .env
 
 # 2. Start MySQL 8.4
-docker compose -f deploy/docker-compose.yml up -d
+docker compose up -d db
 
 # 3. Build, and run the unit and integration suites
 ./mvnw clean verify
@@ -280,8 +287,15 @@ than an in-memory substitute, so the migration is exercised on the engine that s
 student can submit and read a decision, and a reviewer can decide. The continuous-integration half
 of the pipeline exists — [`Jenkinsfile`](Jenkinsfile) runs the build, the unit, integration and
 Selenium suites, a started test environment, and the quality gate that refuses to build an image
-from a failed revision. What is still absent is the delivery half: no `Dockerfile`, no Ansible
-playbooks, no registry publication, and no rollback path.
+from a failed revision. The image itself is now defined: a multi-stage
+[`Dockerfile`](Dockerfile) that packages the JAR Maven built, and a
+[`compose.yaml`](compose.yaml) that runs it beside MySQL with a volume each. What is still absent is
+the delivery half: no registry publication, no Ansible playbooks, and no rollback path.
+
+The image is **written, not built** — `Dockerfile` and `compose.yaml` were added in a sandbox with no
+route to a registry, so no `docker build` has run. See
+[`docs/operations/docker.md` §8](docs/operations/docker.md) for the list of unverified claims and
+the commands that would close them.
 
 The audit trail (FR-24), still outstanding from Milestone 2, is the one functional criterion not yet
 met and should either ride along with Milestone 5 or be explicitly deferred in an ADR.
@@ -345,7 +359,8 @@ terms.
 **None of the three fixes has been re-run.** Everything below describes run 3's state; the repaired
 tests are what stands between this revision and a green build.
 
-As of 2026-10-02:
+As of 2026-10-06. The test-status rows below were established by the 2026-10-02 runs and nothing has
+been re-run since; the Docker rows were added on 2026-10-06 and were not run at all:
 
 | Claim | Status |
 | --- | --- |
@@ -365,8 +380,11 @@ As of 2026-10-02:
 | Spring Boot 4.1.1 and the starter coordinates resolve | **Verified** — the parent resolves, the JAR is repackaged, the context boots |
 | `V1__baseline.sql` applies and `users` accepts the documented roles | **Verified** by the recorded `ApplicationContextIT` (Milestone 2 revision) |
 | Authentication and route rules behave as documented | **Verified** by the recorded `AuthenticationIT` (11) and `AuthorizationIT` (14) |
-| `deploy/docker-compose.yml` brings MySQL up healthy | **Not run** — the tests use a Testcontainers MySQL rather than the Compose service |
-| The application serves `/actuator/health` | **Not run** |
+| `compose.yaml` brings MySQL up healthy | **Not run** — the tests use a Testcontainers MySQL rather than the Compose service |
+| the application serves `/actuator/health` | **Not run** |
+| the `Dockerfile` builds an image | **Not run** — no `docker build` has been executed ([docker.md §8](docs/operations/docker.md)) |
+| the image runs as a non-root user and answers its own health check | **Not run** |
+| uploaded files and database rows survive replacing the application container | **Not run** — the procedure is [docker.md §5–§6](docs/operations/docker.md) |
 | A real browser can complete a workflow | **Not run** — the Selenium suite and the environment scripts that start the deployment it drives exist, but no browser run has been executed |
 
 Design intent is recorded and reviewable; behaviour counts as evidence only where a run is named

@@ -37,7 +37,7 @@ The gate those stages enforce is documented separately, because it is the part w
 | **Start Test Environment** | `scripts\ci\start-database.cmd`, `start-application.cmd`, `wait-for-health.cmd` | MySQL 8.4 is healthy, the packaged JAR is running, and it answers `/actuator/health` | Yes |
 | **Selenium E2E** | `scripts\ci\run-e2e.cmd` | A real browser completes the student and reviewer journeys against that deployment | Yes |
 | **Publish Reports and Screenshots** | `junit …`, `archiveArtifacts …` | Unit, integration and browser results, and the failure screenshots, attached to the build | No — publishes |
-| **Docker Build** | gated | Gated on a green build **and** the existence of a `Dockerfile`. Skipped today | Skipped when ungreen |
+| **Docker Build** | `docker build -t online-assignment-portal:${GIT_COMMIT} .` | Packages the JAR the Package stage produced into the image in `Dockerfile`. Gated on a green build. Tags locally; pushes to no registry | Skipped when ungreen |
 | **Deployment** | gated | Gated on a green build **and** the existence of `ansible/` or `deploy/ansible/`. Not implemented | Skipped when ungreen |
 
 `post { always }` then stops the environment, collects diagnostics, publishes the reports a second
@@ -194,7 +194,7 @@ other ([CLAUDE.md §9](../../CLAUDE.md)).
 | Not present | Why |
 | --- | --- |
 | **Deploy** | The stage exists and is gated, but its steps are not implemented. The deployment, health-check and rollback work is the delivery-pipeline milestone, and a deploy step now would deploy code that has never had a green build ([CLAUDE.md §13](../../CLAUDE.md)). |
-| **Build or push a Docker image** | The stage exists and is gated on a green build *and* on a `Dockerfile`. There is no `Dockerfile` yet, so the stage is skipped visibly rather than passing while doing nothing — and no registry is configured, which is deliberate: an image pushed by a pipeline holding registry credentials it has no business holding is an image that escapes review. |
+| **Push a Docker image** | The stage builds an image and tags it with the commit; it pushes nothing, and no registry is configured. That is deliberate: an image pushed by a pipeline holding registry credentials it has no business holding is an image that escapes review. Registry publication belongs with the deployment work. |
 | **A coverage gate, notifications** | Not requested at this stage; adding them now would be a threshold with nothing behind it. |
 
 ## 10. Known gaps

@@ -181,11 +181,16 @@ pipeline {
             // never evaluates this stage's steps, so no image is built and nothing can carry a
             // bad revision forward.
             //
-            // The second condition — that a Dockerfile exists — keeps the stage honest today.
-            // The multi-stage Dockerfile is Milestone 5 work and CLAUDE.md §13 holds that
-            // milestone back until a `clean verify` is green; until it lands this stage is
-            // skipped visibly ("Stage skipped due to when conditional") rather than passing
-            // while doing nothing, and it activates by itself the day the file appears.
+            // The second condition — that a Dockerfile exists — is what kept this stage honest
+            // while there was none. It was skipped visibly ("Stage skipped due to when
+            // conditional") rather than passing while doing nothing, and it was written to
+            // activate by itself the day the file appeared. That day is now: `Dockerfile` is in
+            // the tree, so this stage runs whenever the build is green — and still never when it
+            // is not, which is the point.
+            //
+            // CLAUDE.md §13 sequences Milestone 5 after a green `clean verify`, and that
+            // precondition is still unmet. The image this builds is therefore written and not
+            // proven; docs/operations/docker.md §8 lists what has not been run.
             when {
                 allOf {
                     expression { currentBuild.currentResult == 'SUCCESS' }

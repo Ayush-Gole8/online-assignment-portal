@@ -17,8 +17,8 @@ rem   The volume is the point. A CI database that survives the run would carry o
 rem   build's submissions into the next, and the browser suite's fixed submission
 rem   titles would then match more than one row. Destroying the volume is what
 rem   makes a run independent of every run before it. The named volume is
-rem   assignment-portal-mysql-data (deploy/docker-compose.yml), created and removed
-rem   by this pair of scripts and by nothing else in CI.
+rem   assignment-portal-mysql-data (compose.yaml), created and removed by this
+rem   pair of scripts and by nothing else in CI.
 rem
 rem Failure policy
 rem   This runs from `post { always }`, where a failure would replace the one the
@@ -39,7 +39,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$pidFile = '%PID_PATH%';
 
 echo [stop-environment] Destroying the database and its volume...
 
-docker compose -f deploy\docker-compose.yml down -v --remove-orphans
+rem compose.yaml also declares the uploads volume. `down -v` removes that one too,
+rem which is correct for CI and is why this script is not the one to reach for
+rem when clearing up after a container stack you wanted to keep (docker.md §5).
+docker compose -f compose.yaml down -v --remove-orphans
 
 if errorlevel 1 (
     echo [stop-environment] WARNING: the database did not shut down cleanly. Continuing.
