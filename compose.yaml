@@ -1,0 +1,270 @@
+# ===========================================================================
+# The running system: the application, and the database it writes to.
+#
+# This is the composition ADR-006 declares — `app` and `db` on a private
+# network, with two named volumes so that `docker compose down` preserves state
+# and only `down -v` destroys it. It is the file a developer runs on a laptop
+# and the file Ansible will drive on a deployment host; what differs between the
+# two is the values in the environment, never the structure.
+#
+# It is the only Compose file in the repository. It was `deploy/docker-compose.yml`
+# and held the database alone, because there was no application image for an
+# `app` service to name. The Dockerfile in this directory supplies one, so the
+# database definition moved here rather than being copied here — there is no
+# second file left to drift from this one.
+#
+# Secrets
+#   No credential is written in this file. Every value comes from the
+#   environment, which Compose loads from `.env` in this directory (copy
+#   `.env.example` to `.env` and fill it in). `.env` is git-ignored.
+#
+# Usage (from the repository root)
+#   ./mvnw clean package -DskipTests    # the image packages this artefact
+#   docker compose up -d --build        # build the image, start the stack
+#   docker compose ps                   # what is running, and whether it is healthy
+#   docker compose logs -f app          # follow the application log
+#   docker compose down                 # stop, keep both volumes
+#   docker compose down -v              # stop, DELETE the database and the uploads
+#
+# The full container lifecycle, and which operations preserve state:
+# docs/operations/docker.md.
+# ===========================================================================
+
+name: online-assignment-portal
+
+services:
+
+  # -------------------------------------------------------------------------
+  # MySQL 8.4 — the system of record for metadata (ADR-003, ADR-004).
+  # -------------------------------------------------------------------------
+  db:
+    image: mysql:8.4
+    container_name: assignment-portal-db
+
+    # Restarts on a crash and on a daemon restart, but stays down when an
+    # operator stopped it deliberately. Right for a laptop and for a single-host
+    # deployment alike: it survives a reboot without fighting a manual
+    # `docker compose stop`.
+    restart: unless-stopped
+
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-assignment_portal}
+      MYSQL_USER: ${DB_USERNAME:-assignment_portal}
+      # `:?` makes Compose abort with this message rather than start a database
+      # with an empty or default password. A missing secret must fail loudly.
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set. Copy .env.example to .env and fill it in.}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD is not set. Copy .env.example to .env and fill it in.}
+
+    ports:
+      # Published on loopback only, so a database with a development password is
+      # not reachable from whatever network the machine is plugged into. The port
+      # is needed on the host because `./mvnw spring-boot:run` — the other way to
+      # run the application, and the one a developer uses most — connects from
+      # outside the Compose network. The `app` service below does not use this
+      # mapping: it reaches the database by service name.
+      #
+      # A deployment that never runs the application from the host needs no
+      # database port at all and should delete this block (ADR-006).
+      - "127.0.0.1:${DB_PORT:-3306}:3306"
+
+    volumes:
+      # Named volume, not a bind mount and not the container filesystem, so the
+      # data survives `docker compose down` and image upgrades (ADR-004). The
+      # application container can be removed and replaced without the database
+      # noticing; only `down -v` destroys it.
+      - mysql-data:/var/lib/mysql
+
+    networks:
+      - portal
+
+    healthcheck:
+      # `$$` escapes the variable so Compose passes it through and the
+      # container's own shell expands it from the container's environment — the
+      # password never appears in this file.
+      #
+      # `mysqladmin ping` answers as soon as the server accepts connections,
+      # which is what the application needs before it starts. It is not a
+      # question about the schema; Flyway answers that one for itself.
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD" --silent
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      # MySQL initialises its data directory on first start, which takes longer
+      # than a normal start. Without this the first checks report unhealthy
+      # before the server is even up.
+      start_period: 40s
+
+  # -------------------------------------------------------------------------
+  # The application — the executable JAR, in the image built from ./Dockerfile.
+  # -------------------------------------------------------------------------
+  app:
+    build:
+      # The context is the repository root, because that is where `target/` and
+      # the Dockerfile are. The image packages the JAR `./mvnw package` already
+      # built; it does not invoke Maven, so there is still exactly one build
+      # process in this repository (CLAUDE.md §1).
+      context: .
+      dockerfile: Dockerfile
+
+    # Tagged for traceability, never `latest` (ADR-006). `local` is right for a
+    # laptop. A deployment passes APP_IMAGE_TAG=<commit sha> — the tag the
+    # pipeline built — and runs `docker compose up -d --no-build`, so the image
+    # the suites tested is the image that runs.
+    image: online-assignment-portal:${APP_IMAGE_TAG:-local}
+
+    container_name: assignment-portal-app
+
+    restart: unless-stopped
+
+    depends_on:
+      db:
+        # Not `service_started`. The application validates the schema and runs
+        # Flyway during startup, and it fails fast when it cannot reach the
+        # database — so starting it before MySQL is accepting connections
+        # produces a container that crash-loops until the database catches up.
+        # This states the ordering instead of relying on the restart policy to
+        # discover it.
+        condition: service_healthy
+
+    environment:
+      # ---------------------------------------------------------------------
+      # The database, by SERVICE NAME.
+      #
+      # `db`, not `localhost`, and not the host's published port: inside the
+      # Compose network the application reaches the database container directly
+      # on its own port 3306, whatever DB_PORT publishes on the host.
+      #
+      # DB_URL is built here rather than read from the environment because
+      # `.env`'s DB_URL names `localhost` — correct for `./mvnw spring-boot:run`,
+      # where the application is on the host, and wrong in a container, where
+      # localhost is the container itself. Inheriting it would produce a service
+      # that starts, cannot find its database, and exits.
+      # ---------------------------------------------------------------------
+      DB_URL: "jdbc:mysql://db:3306/${DB_NAME:-assignment_portal}"
+      DB_USERNAME: ${DB_USERNAME:-assignment_portal}
+      # No default, here or in the application. A missing password must fail
+      # loudly rather than fall back to something that works.
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set. Copy .env.example to .env and fill it in.}
+
+      # ---------------------------------------------------------------------
+      # Uploaded artefacts, on the volume below (CLAUDE.md §7 rule 7).
+      #
+      # Deliberately a fixed path and not `${UPLOAD_STORAGE_PATH}`. `.env` sets
+      # that variable to `./uploads` for a host run, and inheriting it here would
+      # put the bytes in the container's writable layer — where replacing the
+      # container destroys every submission, which is the exact failure ADR-004
+      # exists to prevent. The value below is the image's contract, and it
+      # matches the volume's mount point.
+      # ---------------------------------------------------------------------
+      UPLOAD_STORAGE_PATH: /var/lib/portal/uploads
+
+      # The two upload limits move together or not at all. `max-file-size` is
+      # read by BOTH the servlet container's parser and the validator, and
+      # `max-request-size` must stay larger than it or a legitimate file at the
+      # limit is refused with a sentence naming a size that did not refuse it
+      # (application.yml; UiRenderingIT asserts the two agree).
+      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-10MB}
+      UPLOAD_MAX_REQUEST_SIZE: ${UPLOAD_MAX_REQUEST_SIZE:-11MB}
+
+      # Session lifetime and cookie attributes are configuration, so that local
+      # and deployed environments can differ without a rebuild (ADR-005). An
+      # environment served over HTTPS sets SESSION_COOKIE_SECURE=true; left
+      # false here because a Secure cookie is not sent over plain http://, which
+      # would silently break sign-in on a local stack.
+      SESSION_TIMEOUT: ${SESSION_TIMEOUT:-30m}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+
+      # ---------------------------------------------------------------------
+      # Account seeding — off, and it stays off.
+      #
+      # DevelopmentUserSeeder creates one demo account per role, and only when
+      # the `dev` profile is active AND app.seed.enabled is true AND that
+      # account's own email and password are set. There is no default password
+      # anywhere in the code.
+      #
+      # Passing the variables through unset is safe rather than merely tidy: the
+      # seeder tests each value with StringUtils.hasText, which is false for an
+      # empty string exactly as it is for an absent one. So the two empty
+      # variables below skip the account with a warning; they cannot create one
+      # with a blank password.
+      #
+      # A developer who wants the demo accounts on this stack sets
+      # SPRING_PROFILES_ACTIVE=dev, APP_SEED_ENABLED=true and a password for
+      # each account in `.env` — which is git-ignored, and which no shared
+      # environment has.
+      # ---------------------------------------------------------------------
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+      APP_SEED_ENABLED: ${APP_SEED_ENABLED:-false}
+      APP_SEED_STUDENT_EMAIL: ${APP_SEED_STUDENT_EMAIL:-}
+      APP_SEED_STUDENT_PASSWORD: ${APP_SEED_STUDENT_PASSWORD:-}
+      APP_SEED_REVIEWER_EMAIL: ${APP_SEED_REVIEWER_EMAIL:-}
+      APP_SEED_REVIEWER_PASSWORD: ${APP_SEED_REVIEWER_PASSWORD:-}
+      APP_SEED_ADMIN_EMAIL: ${APP_SEED_ADMIN_EMAIL:-}
+      APP_SEED_ADMIN_PASSWORD: ${APP_SEED_ADMIN_PASSWORD:-}
+
+      # APP_PORT is deliberately NOT set. `server.port: ${APP_PORT:8080}` gives
+      # the container 8080, which is what the Dockerfile's EXPOSE declares, what
+      # the image's HEALTHCHECK probes, and what the mapping below publishes on
+      # the host. Every other setting the application reads falls back to its
+      # default in application.yml.
+
+    ports:
+      # The only application port this composition publishes.
+      #
+      # The host side defaults to 8081 rather than the application's own 8080,
+      # for a reason recorded in scripts/ci/env.cmd: Jenkins owns 8080 on the
+      # machine that runs this pipeline, so a stack publishing 8080 there would
+      # fail to bind. 8081 is already what the rest of the repository means by
+      # "the portal, running on this machine".
+      #
+      # Bound to loopback. Nothing outside this host has any business reaching a
+      # stack started from a developer's checkout, and a deployment behind a
+      # reverse proxy on the same host wants exactly this. Publishing it more
+      # widely should be a deliberate change, not an inherited default.
+      - "127.0.0.1:${APP_HOST_PORT:-8081}:8080"
+
+    volumes:
+      # The other half of ADR-004: metadata in MySQL, bytes on a volume. This is
+      # what makes an uploaded file survive `docker compose up -d
+      # --force-recreate`, a `docker rm` of the application container, and a
+      # redeployment of a new image. The container is disposable; the volume is
+      # not.
+      - app-uploads:/var/lib/portal/uploads
+
+    networks:
+      - portal
+
+    # No healthcheck here, deliberately.
+    #
+    # The image declares one (Dockerfile, HEALTHCHECK) and Compose inherits it,
+    # so `docker compose ps` reports the same health the image reports to a bare
+    # `docker run`. One definition, in the place that cannot be deployed without
+    # it, rather than two that can drift apart. The probe reads APP_PORT with the
+    # application's own default, which is why that variable is not set above.
+
+# ---------------------------------------------------------------------------
+# The private network. `app` and `db` address one another by service name, and
+# nothing on it is reachable from outside the composition except through a
+# published port.
+# ---------------------------------------------------------------------------
+networks:
+  portal:
+    driver: bridge
+
+# ---------------------------------------------------------------------------
+# The two things a replacement container must not take with it.
+# ---------------------------------------------------------------------------
+volumes:
+  # Database data.
+  mysql-data:
+    name: assignment-portal-mysql-data
+
+  # Uploaded artefacts.
+  app-uploads:
+    name: assignment-portal-uploads
+
+# Explicit `name:` on both, so `docker volume ls` and any backup script do not
+# depend on the Compose project prefix and keep working if the project is
+# renamed. ADR-006 names both volumes.

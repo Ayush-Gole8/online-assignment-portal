@@ -134,7 +134,7 @@ The loop a contributor runs before opening a pull request:
 
 ```bash
 # Start the dependencies (MySQL) the application needs
-docker compose -f deploy/docker-compose.yml up -d
+docker compose up -d db
 
 # Build, and run the unit and integration suites — what CI will run
 ./mvnw clean verify

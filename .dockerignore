@@ -1,0 +1,39 @@
+# ===========================================================================
+# Build context for the production image.
+#
+# The image is assembled from exactly one file: the executable JAR Maven
+# produced. Nothing else in this repository is read by the Dockerfile, so
+# nothing else is sent. That is a large difference rather than a tidy one —
+# `target/` alone holds compiled classes, the unpacked dependency set, test
+# reports and the `.jar.original` sidecar, and the repository root holds `.git`.
+# Excluding them keeps the context at a few tens of megabytes instead of
+# hundreds, and — the part that matters — makes it impossible for a source file,
+# a test, a migration script or a local `.env` to reach the runtime image by
+# accident, because a file that is not in the context cannot be copied from it.
+#
+# The patterns are two levels because of a rule that catches people out: a file
+# cannot be re-admitted by a negation if the directory that contains it was
+# excluded. So the top level is excluded and the one directory that matters is
+# re-admitted first, then the same is done one level down.
+#
+# Verify what is actually sent:
+#
+#   docker build --no-cache -t online-assignment-portal:local .   # prints the context size
+#   docker run --rm --entrypoint sh online-assignment-portal:local -c 'ls -la /app'
+# ===========================================================================
+
+# Everything at the top level …
+/*
+# … except the build definition itself, which some builders refuse to locate in
+# an ignored context …
+!/Dockerfile
+# … and the build output, which is re-admitted here only to be filtered below.
+!/target
+
+# Within the build output, everything …
+/target/*
+# … except the executable JAR — the whole reason this file exists. The name is
+# spelled out to match the Dockerfile's COPY: a build that has not run, or a
+# version bump in pom.xml, should fail loudly at the COPY rather than quietly
+# package an empty context.
+!/target/online-assignment-portal-0.0.1-SNAPSHOT.jar

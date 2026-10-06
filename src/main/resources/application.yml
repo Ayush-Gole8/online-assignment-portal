@@ -25,7 +25,7 @@ spring:
   datasource:
     # DB_URL, DB_USERNAME and DB_PASSWORD are supplied by the environment.
     # The defaults exist so a developer can start against the local Compose MySQL
-    # (deploy/docker-compose.yml) without exporting anything. DB_PASSWORD deliberately
+    # (compose.yaml) without exporting anything. DB_PASSWORD deliberately
     # has NO default: a missing password must fail fast, never fall back to empty.
     url: ${DB_URL:jdbc:mysql://localhost:3306/assignment_portal}
     username: ${DB_USERNAME:assignment_portal}

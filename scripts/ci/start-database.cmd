@@ -5,9 +5,15 @@ rem ===========================================================================
 rem Start the CI database.
 rem
 rem What this does
-rem   Brings up MySQL 8.4 from deploy/docker-compose.yml and blocks until its
+rem   Brings up MySQL 8.4 from the repository's compose.yaml and blocks until its
 rem   own healthcheck reports healthy. The same image tag the integration tests
 rem   and production use, so the E2E environment is not a different engine.
+rem
+rem   Only the `db` service is named. compose.yaml also declares the application,
+rem   and this pipeline starts that one itself — as the packaged JAR, from
+rem   start-application.cmd — so the application service is deliberately left
+rem   alone. Naming a service to `up` starts that service and its dependencies
+rem   and nothing else.
 rem
 rem Why compose rather than Testcontainers
 rem   The integration tests own their container: it is created and destroyed
@@ -37,14 +43,14 @@ call "%~dp0env.cmd"
 
 echo [start-database] Starting MySQL 8.4 (database %DB_NAME%, port %DB_PORT%)...
 
-docker compose -f deploy\docker-compose.yml up -d --wait db
+docker compose -f compose.yaml up -d --wait db
 
 if errorlevel 1 (
     echo [start-database] FAILED: the database did not become healthy.
     echo [start-database] Container state:
-    docker compose -f deploy\docker-compose.yml ps
+    docker compose -f compose.yaml ps
     echo [start-database] Recent logs:
-    docker compose -f deploy\docker-compose.yml logs --tail 50 db
+    docker compose -f compose.yaml logs --tail 50 db
     exit /b 1
 )
 

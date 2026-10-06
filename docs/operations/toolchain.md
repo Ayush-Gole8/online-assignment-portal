@@ -24,7 +24,7 @@ Until a row is filled in, treat it as **unverified** and do not claim the prereq
 > **Reading the current state.** Two different kinds of value appear below and they are not
 > equivalent:
 >
-> - **Declared** — read out of `pom.xml` or `deploy/docker-compose.yml`. This is a fact about
+> - **Declared** — read out of `pom.xml`, `compose.yaml` or `Dockerfile`. This is a fact about
 >   the repository, verified by inspection.
 > - **Unverified** — the version a resolving build or a local machine would report. **Not yet
 >   established**, because the tool-version commands have not been run on this machine. A build
@@ -46,7 +46,7 @@ Until a row is filled in, treat it as **unverified** and do not claim the prereq
 
 | Tool | Required | Verification command | Actual version | Verified | Notes |
 | --- | --- | --- | --- | --- | --- |
-| MySQL Server | 8.4 (LTS) | Testcontainers build log | **8.4.11** | 2026-10-01 | Started by Testcontainers during `ApplicationContextIT`; Hibernate reports `Database version: 8.4.11`. The Compose service in `deploy/` is still unverified |
+| MySQL Server | 8.4 (LTS) | Testcontainers build log | **8.4.11** | 2026-10-01 | Started by Testcontainers during `ApplicationContextIT`; Hibernate reports `Database version: 8.4.11`. The Compose service in `compose.yaml` has never been started |
 | MySQL Connector/J | Managed by the Spring Boot BOM | build log | Loaded and connected — **exact version unverified** | 2026-10-01 | Hibernate reports `Database driver: MySQL Connector/J` and HikariCP opened a connection |
 | Flyway | Managed by the Spring Boot BOM | BOM inspection | **12.4.0** — but its **autoconfiguration was missing** | 2026-10-01 | `<flyway.version>12.4.0</flyway.version>` in `spring-boot-dependencies-4.1.1.pom`. Boot 4 moved `FlywayAutoConfiguration` into the **`spring-boot-flyway`** module, so `flyway-core` alone is inert — the context starts and no migration runs. Fixed by adding `spring-boot-starter-flyway`; `flyway-mysql` remains required |
 
@@ -57,6 +57,8 @@ Until a row is filled in, treat it as **unverified** and do not claim the prereq
 | Docker Engine | 24+ | Testcontainers handshake | **29.6.1** (API 1.55) | 2026-10-01 | Reported by Testcontainers: `Server Version: 29.6.1`, `Operating System: Docker Desktop (containerized)`, 7794 MB total memory |
 | Docker Compose | v2 (`docker compose`) | `docker compose version` | `TBD` — **unverified** | — | The v2 plugin form, not the legacy `docker-compose` binary |
 | Docker Buildx | Current | `docker buildx version` | `TBD` — **unverified** | — | Needed for multi-stage, layer-cached builds |
+| Runtime base image | Java 21 (LTS), maintained, not `latest` | `docker buildx imagetools inspect eclipse-temurin:21-jre` | **Declared** — `eclipse-temurin:21-jre` | — | Eclipse Temurin. **Pinned by tag, not by digest**, so a patch release can still change under a rebuild — the residual gap [`docker.md` §2.1](docker.md) records, with the command that closes it |
+| MySQL image | 8.4 (LTS) | `docker image inspect mysql:8.4` | **Declared** — `mysql:8.4` | — | Declared in `compose.yaml`. The Compose service itself has not been started — the integration tests run MySQL through Testcontainers instead |
 
 > Testcontainers requires a working Docker daemon. Confirm with `docker info` before running
 > integration tests; a stopped daemon produces confusing failures. **`./mvnw clean verify`
