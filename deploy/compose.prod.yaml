@@ -1,0 +1,186 @@
+# ===========================================================================
+# Production composition — what runs on a deployment host.
+#
+# This file is the deployment half of ADR-006. It declares the SAME running
+# system as `compose.yaml` at the repository root — one application container,
+# one database container, one network, one volume each, healthchecks on both —
+# and differs from it in exactly two ways, both of which follow from being a
+# deployment rather than a checkout:
+#
+#   1. It does NOT build. The `app` service has no `build:` and references an
+#      image by an exact version tag. `compose.yaml` builds from the Dockerfile
+#      so a developer can run the tree they are editing; a deployment must run
+#      the image the pipeline built and tested, and a deployment that rebuilds
+#      is a deployment that ships something no test ever ran.
+#
+#   2. It publishes no database port. ADR-006: "Only the application port is
+#      published; the database port is not exposed to the host." `compose.yaml`
+#      publishes 3306 on loopback because a developer may run the application
+#      outside Compose; nothing on a deployment host does that.
+#
+# Everything environment-specific arrives from `.env` in this directory, which
+# is NOT committed. `env.production.example` beside this file lists every
+# variable it reads, with no values. Nothing here is a secret, and nothing here
+# has a fallback that would let the stack start half-configured: the required
+# variables use `${VAR:?message}`, so Compose refuses to start and names the
+# missing variable instead of starting a container that will fail later.
+#
+# The release process that drives this file over SSH is
+# docs/operations/docker-cd.md. The image and the local stack are
+# docs/operations/docker.md.
+# ===========================================================================
+
+# The project name. It prefixes the network and is what `docker ps` and
+# `docker compose ps` group by, so it is what an operator types and reads.
+# The two volumes are named explicitly below rather than left to this prefix, so
+# that the data directories keep the same names here as they have in
+# compose.yaml — a deployment host is a new host, but it is not a new system.
+name: assignment-portal
+
+services:
+
+  # -------------------------------------------------------------------------
+  # The database. Same image and same volume name as compose.yaml: a deployed
+  # environment must not run a different engine from the one every integration
+  # and browser test ran against (docs/testing/strategy.md §3.2).
+  # -------------------------------------------------------------------------
+  db:
+    image: mysql:8.4
+    container_name: assignment-portal-db
+    restart: unless-stopped
+
+    environment:
+      # Read from `.env`, which the host owns. Every one of these is required:
+      # a database that starts with an empty password is worse than one that
+      # does not start.
+      MYSQL_DATABASE: ${DB_NAME:?DB_NAME is not set. See deploy/env.production.example.}
+      MYSQL_USER: ${DB_USERNAME:?DB_USERNAME is not set. See deploy/env.production.example.}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set. See deploy/env.production.example.}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD is not set. See deploy/env.production.example.}
+
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+    networks:
+      - portal
+
+    # The healthcheck `app` waits on, and the reason `depends_on` below can use
+    # `condition: service_healthy` rather than a sleep. mysqladmin connects over
+    # the loopback interface *inside the container*, using the credentials the
+    # entrypoint created, and the doubled `$$` is Compose's escape for a literal
+    # `$` — these are evaluated by the container's shell, not by Compose.
+    #
+    # start_period covers the entrypoint's first-start initialisation, which
+    # creates the database and the user before the server accepts connections.
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+    # No `ports:` — see the header. Adding one here would put the database on a
+    # host interface, which ADR-006 forbids in a deployment and which a firewall
+    # rule would then have to undo.
+
+  # -------------------------------------------------------------------------
+  # The application. Referenced by an exact version tag, never built here and
+  # never `latest` (ADR-006).
+  # -------------------------------------------------------------------------
+  app:
+    # Both halves are required, and either being unset fails the deployment
+    # before a container exists. `IMAGE_REPOSITORY` is stable per host and lives
+    # in `.env`; `APP_IMAGE_TAG` is written by the deploy script on every
+    # release, and IS the release's identity — the same value is what the image
+    # reports at /actuator/info (docs/operations/docker-cd.md §6).
+    image: ${IMAGE_REPOSITORY:?IMAGE_REPOSITORY is not set. See deploy/env.production.example.}:${APP_IMAGE_TAG:?APP_IMAGE_TAG is not set — the deploy script writes it. See deploy/env.production.example.}
+
+    container_name: assignment-portal-app
+    restart: unless-stopped
+
+    # Startup ordering, not readiness. `service_healthy` means Flyway finds a
+    # database that is accepting connections, so the application's fail-fast
+    # check is not tripped by a race with MySQL's first-start initialisation.
+    # The application's own readiness is the healthcheck the image declares and
+    # the deploy script's poll of the same endpoint.
+    depends_on:
+      db:
+        condition: service_healthy
+
+    environment:
+      # Inside the Compose network `localhost` is this container, so the
+      # database is addressed by service name — the same reason compose.yaml
+      # builds this URL rather than reading DB_URL from `.env`.
+      DB_URL: "jdbc:mysql://db:3306/${DB_NAME:?DB_NAME is not set. See deploy/env.production.example.}"
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME is not set. See deploy/env.production.example.}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set. See deploy/env.production.example.}
+
+      # Bytes on the volume, metadata in MySQL (ADR-004). Set to the volume's
+      # MOUNT POINT and not to `./uploads`: with the default the application
+      # works perfectly and stores every submission in the container's writable
+      # layer, where the next release destroys all of them.
+      UPLOAD_STORAGE_PATH: /var/lib/portal/uploads
+
+      # The upload limits (FR-7). Passed through so an operator can change them
+      # without a rebuild; the defaults are the application's own, so leaving
+      # them unset is the normal case.
+      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-10MB}
+      UPLOAD_MAX_REQUEST_SIZE: ${UPLOAD_MAX_REQUEST_SIZE:-11MB}
+
+      SESSION_TIMEOUT: ${SESSION_TIMEOUT:-30m}
+
+      # The Secure cookie attribute. Deliberately defaulting to `false`, which
+      # is the same default application.yml carries, and for the same reason: a
+      # Secure cookie is not sent over plain http://, so switching this on
+      # before there is a TLS terminator in front of the application does not
+      # add a protection — the session is already travelling in clear — it only
+      # breaks sign-in. Set it to `true` in the same change that terminates TLS,
+      # never later. Recorded as a gap in docs/operations/docker-cd.md §10.
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+
+      # Which environment this container is. Published at /actuator/info beside
+      # the version, so "what is running, and where" is one question asked of
+      # the application rather than of whoever deployed it. Written into `.env`
+      # by the deploy script from the Jenkins DEPLOY_ENV parameter.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-unknown}
+
+      # Note what is NOT here: the development seed accounts. compose.yaml
+      # passes them through empty so a developer can turn them on; a deployment
+      # does not mention them at all, which means the seeder's `dev` profile and
+      # its APP_SEED_ENABLED flag are both off and there is nothing to
+      # misconfigure. A production stack therefore has an empty `users` table
+      # until a real account is created through the application.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+
+    # The application port, and only the application port (ADR-006). The bind
+    # address is a variable so that a host with a reverse proxy in front of the
+    # application can move it to loopback with one line in `.env`, rather than
+    # by editing a file that a deployment overwrites on every release.
+    ports:
+      - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_HOST_PORT:-8080}:8080"
+
+    volumes:
+      - app-uploads:/var/lib/portal/uploads
+
+    networks:
+      - portal
+
+    # No `healthcheck:` here, deliberately. The image declares one, and that one
+    # is what `/actuator/health` means everywhere else. Declaring a second,
+    # differently-worded probe in this file would be two definitions of "well"
+    # that are free to drift — and the one that drifted would be the one the
+    # deploy script trusted.
+
+networks:
+  portal:
+    driver: bridge
+
+volumes:
+  # Named explicitly, so the database and the uploaded files keep the same
+  # volume names they have under compose.yaml. This is what makes a release a
+  # replacement of the application container rather than of the system
+  # (ADR-004, docker.md §6).
+  mysql-data:
+    name: assignment-portal-mysql-data
+  app-uploads:
+    name: assignment-portal-uploads

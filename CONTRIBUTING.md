@@ -39,6 +39,24 @@ git pull --ff-only
 git switch -c feature/submission-upload
 ```
 
+### Releases
+
+A release is a **git tag**, `v` followed by three dot-separated numbers — `v1.0.1`, never `1.0.1`,
+`v1.0`, or `latest`. The tag is authoritative: it is what determines the image version, what the
+running application reports at `/actuator/info`, and what a deployment names. No build parameter
+can introduce a version, and `latest` is never produced.
+
+```bash
+git switch develop
+git pull --ff-only
+git tag -a v1.0.1 -m "1.0.1"
+git push origin v1.0.1
+```
+
+Tag a commit that has already passed CI. Building the tag runs the full pipeline and, when it is
+green, publishes the image and deploys it — so the tag is a decision, not a bookmark. The rules for
+which refs do what are in [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md) §2.
+
 ## 3. Commits
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
@@ -96,8 +114,12 @@ The pipeline is one job with named stages:
 | **Unit Tests** | `.\mvnw.cmd -B clean test` — the fast suite |
 | **Integration Tests** | `.\mvnw.cmd -B failsafe:integration-test failsafe:verify` — Testcontainers MySQL 8.4 |
 | **Package** | `.\mvnw.cmd -B package -DskipTests` — the executable JAR |
-| **Publish Test Reports** | Surefire and Failsafe JUnit XML, attached to the build |
-| **Archive Artifact** | The JAR, archived and fingerprinted |
+| **Selenium E2E** | A real browser completes the student and reviewer journeys against a deployment the pipeline starts |
+| **Publish Reports and Screenshots** | Surefire and Failsafe JUnit XML, the failure screenshots, and the JAR, attached to the build |
+| **Release Version** | Whether this revision is a release, and which version — the tag on `HEAD`, or nothing |
+| **Docker Build** | Packages the JAR into the image in `Dockerfile`, with the version baked in |
+| **Publish Image** | *Release only.* Re-tags into `IMAGE_REPOSITORY:<version>` and pushes to Docker Hub |
+| **Deploy** | *Release only, when `DEPLOY_ENV` names an environment.* The versioned image runs on the host, answers health, passes a smoke test — or the previous version is restored |
 
 What follows from that:
 
@@ -105,14 +127,21 @@ What follows from that:
   that has not addressed the cause.
 - The pipeline runs on a **Windows agent labelled `windows`**, through the **Maven Wrapper** — never
   a Maven installed on `PATH`.
-- CI **builds and tests only**. It does not deploy and does not publish a container image yet.
-- **No credential is written in the `Jenkinsfile`**, and the pipeline needs none: the integration
-  suite starts its own MySQL container with credentials Testcontainers generates.
+- **A pull request builds and tests only.** The three stages after **Release Version** are gated on
+  the revision being a `vX.Y.Z` tag, so a feature branch reaches neither the registry nor a host.
+  Publishing and deploying are things you do by tagging, deliberately — never a side effect of
+  pushing a branch.
+- **No credential is written in the `Jenkinsfile`.** An untagged build needs none: the integration
+  suite starts its own MySQL container with credentials Testcontainers generates. On a release, two
+  credentials are bound from the Jenkins credentials store — the Docker Hub token and the SSH key —
+  each into the environment of one stage only (`docs/operations/jenkins-ci.md` §6).
 - Reproduce CI locally with `.\mvnw.cmd clean verify` **before** pushing. A change that is green
   locally and red in CI is a difference worth understanding, not a flake to re-run.
 
 Setup, agent requirements, and the full configuration are in
-[`docs/operations/jenkins-ci.md`](docs/operations/jenkins-ci.md).
+[`docs/operations/jenkins-ci.md`](docs/operations/jenkins-ci.md). The release rules, the host
+contract, the smoke test and the rollback are in
+[`docs/operations/docker-cd.md`](docs/operations/docker-cd.md).
 
 ## 6. Definition of done
 

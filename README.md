@@ -29,11 +29,15 @@ The application is deliberately modest. The engineering objective of this reposi
 > green build is still Milestone 2's.**
 >
 > **Not yet present — deliberately:** the audit trail (FR-24), any form of resubmission, and an
-> admin UI beyond the role gate. The *continuous-integration* half of the pipeline now exists — a
-> [`Jenkinsfile`](Jenkinsfile), a Selenium suite, and a [`Dockerfile`](Dockerfile) that packages the
-> JAR into a production image. What is still absent is the *delivery* half: no registry publication,
-> no Ansible provisioning, no deployment and no rollback path. **Nothing in that half has run to
-> green, and the image has never been built.**
+> admin UI beyond the role gate. Both halves of the pipeline are now written: continuous
+> integration — a [`Jenkinsfile`](Jenkinsfile), the unit/integration/browser suites, and a
+> [`Dockerfile`](Dockerfile) that packages the JAR into a production image — and, added
+> 2026-10-07, the release process — a `vX.Y.Z` git tag is the version, the image is published to
+> Docker Hub under it ([`deploy/`](deploy), [`scripts/ops/`](scripts/ops),
+> [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)), and a host runs that exact
+> version or the previous one is restored. **Nothing in either half has run to green: the image
+> has never been built, no image has been pushed, no host has been contacted, and no rollback has
+> fired.** What is still genuinely absent is provisioning: no Ansible, no TLS, no backup story.
 >
 > See [Unverified claims](#unverified-claims) before relying on any statement below.
 >
@@ -84,6 +88,7 @@ their own history sees what happened and when, but not who decided it.
 | `GET /access-denied` | signed-in | Shown when an authenticated user lacks the role a route requires |
 | `GET /error` | anonymous | The page every unhandled failure renders as — status only |
 | `GET /actuator/health` | anonymous | Liveness — status only, no details |
+| `GET /actuator/info` | anonymous | Build identity — the release version baked into the image, and the environment it is running in. Two identifiers and nothing else |
 
 Authorisation is a route rule in the security filter chain, not a check inside a handler. A student
 reaching another student's submission gets **404**, not **403** — "not yours" and "not there" are
@@ -155,9 +160,19 @@ Each stage is documented, and every stage that produces evidence stores it under
 the unit, integration and Selenium suites, and the quality gate that stops a failed revision before
 it can be released — is committed as [`Jenkinsfile`](Jenkinsfile) and described in
 [`docs/operations/jenkins-ci.md`](docs/operations/jenkins-ci.md) and
-[`docs/testing/ci-quality-gates.md`](docs/testing/ci-quality-gates.md). The delivery half — the
-Docker image, the registry, provisioning, deployment and rollback — is built in a later milestone,
-and the required stages are fixed by [`docs/requirements/mvp.md`](docs/requirements/mvp.md).
+[`docs/testing/ci-quality-gates.md`](docs/testing/ci-quality-gates.md).
+
+The delivery half is committed too, and described in
+[`docs/operations/docker-cd.md`](docs/operations/docker-cd.md): **what runs is decided by the ref
+being built.** A feature branch, `develop` or `main` runs CI and stops — the image is built locally
+so a broken `Dockerfile` is caught, and it is never published. A **`vX.Y.Z` tag** runs CI and, when
+it is green, publishes `IMAGE_REPOSITORY:1.0.1` to Docker Hub and deploys that exact version to a
+host if `DEPLOY_ENV` names one. `latest` is never produced. The version is baked into the image at
+build time and published at `/actuator/info`, so the post-deployment smoke test can prove the
+release answering is the release deployed — and the previous version is restored if it cannot.
+
+**Nothing in the delivery half has been executed.** The release rules, the credentials, the host
+contract, and a claim-by-claim list of what has not been run are in `docker-cd.md` §2–§8.
 
 ## Repository layout
 
@@ -172,6 +187,9 @@ and the required stages are fixed by [`docs/requirements/mvp.md`](docs/requireme
 │                                 #   runs it as a non-root user on a Temurin 21 JRE
 ├── compose.yaml                  # The running system: the application and MySQL 8.4,
 │                                 #   two named volumes, health checks, explicit ports
+├── deploy/                       # The deployment half: compose.prod.yaml (pulls a
+│                                 #   published version, never builds), the host .env
+│                                 #   template, and the host-side release script
 ├── .dockerignore                 # admits one file into the build context: the JAR
 ├── mvnw / mvnw.cmd               # Maven Wrapper — the canonical build mechanism
 │                                 #   pins Maven 3.9.16; no local Maven needed
@@ -206,9 +224,9 @@ and the required stages are fixed by [`docs/requirements/mvp.md`](docs/requireme
 │   ├── architecture/             # Structure, diagrams, data model
 │   ├── adr/                      # Architecture Decision Records
 │   ├── testing/                  # Test strategy and the test pyramid
-│   ├── operations/               # Toolchain, CI, Docker, runbooks
+│   ├── operations/               # Toolchain, CI, Docker, the release process, runbooks
 │   └── evidence/                 # Captured proof per pipeline stage
-└── scripts/                      # ci/ dev/ helper scripts
+└── scripts/                      # ci/ dev/ ops/ helper scripts
 ```
 
 ## Documentation map
@@ -224,6 +242,7 @@ and the required stages are fixed by [`docs/requirements/mvp.md`](docs/requireme
 | [`docs/testing/strategy.md`](docs/testing/strategy.md) | What is tested at each layer |
 | [`docs/operations/toolchain.md`](docs/operations/toolchain.md) | Required tool versions |
 | [`docs/operations/docker.md`](docs/operations/docker.md) | The production image, the Compose stack, and the container lifecycle |
+| [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md) | The release process: what each ref does, publishing to Docker Hub, deploying and rolling back |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to propose a change |
 | [`SECURITY.md`](SECURITY.md) | How uploads, secrets, and vulnerabilities are handled |
 
@@ -359,8 +378,9 @@ terms.
 **None of the three fixes has been re-run.** Everything below describes run 3's state; the repaired
 tests are what stands between this revision and a green build.
 
-As of 2026-10-06. The test-status rows below were established by the 2026-10-02 runs and nothing has
-been re-run since; the Docker rows were added on 2026-10-06 and were not run at all:
+As of 2026-10-07. The test-status rows below were established by the 2026-10-02 runs and nothing has
+been re-run since; the Docker rows were added on 2026-10-06 and the release rows on 2026-10-07, and
+neither set has been run at all:
 
 | Claim | Status |
 | --- | --- |
@@ -386,6 +406,11 @@ been re-run since; the Docker rows were added on 2026-10-06 and were not run at 
 | the image runs as a non-root user and answers its own health check | **Not run** |
 | uploaded files and database rows survive replacing the application container | **Not run** — the procedure is [docker.md §5–§6](docs/operations/docker.md) |
 | A real browser can complete a workflow | **Not run** — the Selenium suite and the environment scripts that start the deployment it drives exist, but no browser run has been executed |
+| The pipeline publishes a versioned image to Docker Hub | **Not run** — nothing has been pushed. The rules are in [docker-cd.md §2](docs/operations/docker-cd.md) |
+| The application reports its own version at `/actuator/info` | **Asserted, not run** — `AuthorizationIT` covers it; the suite has not executed since the endpoint was added |
+| A release is deployed to a host and verified by a smoke test | **Not run** — no host has been contacted |
+| A failed deployment rolls back to the previous version | **Not run** — the rollback has never fired. [docker-cd.md §7](docs/operations/docker-cd.md) |
+| The release gate keeps a feature branch out of the registry and off a host | **Not run** — the equivalent gate on the image build is observed to skip in [defect-demonstration.md](docs/evidence/defect-demonstration.md); the two new gates have not been exercised |
 
 Design intent is recorded and reviewable; behaviour counts as evidence only where a run is named
 above. [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine)

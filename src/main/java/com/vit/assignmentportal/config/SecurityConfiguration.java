@@ -69,6 +69,25 @@ public class SecurityConfiguration {
                         // it reports status only, with no details (application.yml).
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
 
+                        // The build-identity endpoint, read by the post-deployment smoke
+                        // test (scripts/ops/smoke-test.ps1). It publishes two values and
+                        // no more: the version baked into the image and the environment
+                        // the deployment runs in. Both are identifiers rather than
+                        // credentials, and neither is a route into the system.
+                        //
+                        // It cannot be authenticated, for the same reason health cannot:
+                        // a deployment that must hold a credential to ask "is the release
+                        // I deployed the release that is answering" is a deployment that
+                        // has to store a credential on the machine it is checking.
+                        //
+                        // Named exactly, and NOT as `/actuator/**`. The wildcard would
+                        // open `env`, `configprops` and `beans` — which publish
+                        // configuration — to anonymous visitors, which is the failure this
+                        // line is written against. application.yml exposes only `health`
+                        // and `info`, so that wildcard would be harmless today and
+                        // catastrophic the day one exposure setting changes.
+                        .requestMatchers("/actuator/info").permitAll()
+
                         // Error dispatch. Spring Security 6 and later applies these rules to
                         // ERROR dispatch as well as REQUEST, so without this line an anonymous
                         // visitor who mistypes a URL is redirected to the login page instead of

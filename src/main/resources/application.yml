@@ -80,13 +80,61 @@ management:
   endpoints:
     web:
       exposure:
-        # Only `health` is published. `env`, `configprops` and `beans` would expose
-        # configuration and must never be internet-reachable.
-        include: health
+        # `health` is what the pipeline's readiness gate and the image's own
+        # HEALTHCHECK ask for. `info` publishes this build's identity — the
+        # version baked into the image, and the environment the deployment runs
+        # in — and nothing else; see the note on `info` below.
+        #
+        # `env`, `configprops` and `beans` would expose configuration and must
+        # never be internet-reachable.
+        include: health,info
   endpoint:
     health:
       # Report status only. Details can include database host names and driver versions.
       show-details: never
+  info:
+    env:
+      # Publishes the `info.*` properties defined at the bottom of this file, and
+      # only those — because nothing else in this repository declares an `info.*`
+      # key and nothing sets an `INFO_*` environment variable.
+      #
+      # That bound IS the control, and it is worth being blunt about what it
+      # costs: enabling this makes every property under `info.` publicly
+      # readable. So `info.` is the one namespace in this configuration where a
+      # careless key is a disclosure rather than a mistake, and no secret,
+      # connection string or filesystem path may ever be placed under it
+      # (CLAUDE.md §7 rules 2 and 11). Adding a key under `info.` is a change to
+      # what an anonymous visitor can read, and belongs in a review that says so.
+      enabled: true
+
+# ---------------------------------------------------------------------------
+# Build identity — which release this is, and where it is running.
+#
+# Published anonymously at /actuator/info, which is deliberate and is the one
+# endpoint this application exposes beyond health. A deployment has to be able to
+# prove that the release it deployed is the release that is answering — without
+# that, "the deployment succeeded" means only that something healthy is running,
+# and a stale image left by a failed pull satisfies it perfectly.
+#
+# Both values are identifiers, not credentials: a version number and the word
+# `staging` or `production`. Neither is a route into the system, and the rest of
+# the file's settings — the datasource, the storage root, the session policy —
+# remain unpublished.
+# ---------------------------------------------------------------------------
+info:
+  app:
+    # The release version, baked into the image at build time by the Dockerfile's
+    # APP_VERSION build argument. It travels with the artefact, so it cannot be
+    # contradicted by a deployment's configuration. `unknown` is what an image
+    # built outside the release pipeline reports — a working-tree build, or a
+    # local `docker build`.
+    version: ${APP_VERSION:unknown}
+
+    # Which environment this container is, from the deployment composition
+    # (deploy/compose.prod.yaml), which takes it from the Jenkins DEPLOY_ENV
+    # parameter. This one IS configuration and not identity: the same image is
+    # promoted between environments and must report where it landed.
+    environment: ${APP_ENVIRONMENT:unknown}
 
 server:
   port: ${APP_PORT:8080}

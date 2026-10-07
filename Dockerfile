@@ -168,6 +168,34 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=6 \
     CMD curl --fail --silent --show-error --output /dev/null \
         "http://localhost:${APP_PORT:-8080}/actuator/health"
 
+# The version this image is.
+#
+# Baked in at build time rather than injected at run time, because the two are
+# not equivalent. The release pipeline runs
+#
+#   docker build --build-arg APP_VERSION=1.0.1 -t <repository>:1.0.1 .
+#
+# so the tag and the value here come from one variable in one command, and a
+# deployment that pulls `<repository>:1.0.1` gets an image that reports 1.0.1
+# whatever its own configuration says. A version read from the deployment's
+# environment would instead be a claim the deployment makes about itself, and a
+# deployment running a stale image would make it just as confidently.
+#
+# The application publishes it at /actuator/info (application.yml), which is what
+# lets scripts/ops/smoke-test.ps1 prove that the release which was deployed is the
+# release that is answering.
+#
+# `unknown` is the honest default for a build that was not given one — an image
+# built from a working tree rather than from a tag. It is deliberately not empty:
+# an empty value would be indistinguishable from "the property was never set".
+#
+# This is NOT environment configuration and must not become it. The environment
+# name is a deployment's business and arrives from deploy/compose.prod.yaml, so
+# that one artefact can be promoted between environments without being rebuilt
+# (CLAUDE.md §8).
+ARG APP_VERSION=unknown
+ENV APP_VERSION=${APP_VERSION}
+
 # Heap sizing from the container's limit, not the host's memory.
 #
 # Without this the JVM sizes its heap from the host's physical memory, ignores
