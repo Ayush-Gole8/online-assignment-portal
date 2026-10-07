@@ -1,35 +1,80 @@
 /*
- * Jenkins Continuous Integration — Online Assignment Portal.
+ * Jenkins Continuous Integration and Release — Online Assignment Portal.
  *
  * Declarative pipeline on a Windows agent. The setup it assumes, the toolchain an
  * agent must provide, and the branch flow it serves are documented in
  * docs/operations/jenkins-ci.md. The gate this file enforces is documented in
- * docs/testing/ci-quality-gates.md.
+ * docs/testing/ci-quality-gates.md. The release process — the rules, the
+ * credentials, the deployment host, and the rollback — is documented in
+ * docs/operations/docker-cd.md.
  *
- * Three rules shape this file, all from CLAUDE.md:
- *   - §7 rule 1: no credential is written here, ever. A build reads secrets from the
- *     environment the agent provides; it never carries one in its own definition.
+ * Four rules shape this file, all from CLAUDE.md:
+ *   - §7 rule 1: no credential is written here, ever. A build reads secrets from
+ *     the environment the agent provides; it never carries one in its own
+ *     definition. The two identifiers in `environment` below are the NAMES of
+ *     entries in the Jenkins credentials store, which is a different thing from
+ *     the values inside them.
  *   - §10: the Maven Wrapper is the canonical build mechanism, so every Maven call
  *     below goes through .\mvnw.cmd and never through a Maven that happens to be on PATH.
  *   - §1: the application is a modest thing and the pipeline is the deliverable, so the
  *     stages below are named for what they establish, and each one fails the build on its
  *     own terms.
+ *   - §13: the delivery half of the pipeline is Milestone 5, and this file is where it
+ *     arrives.
  *
  * The quality gate, in one sentence: a green build is the only thing that reaches
- * Docker Build, and Docker Build is the only thing that reaches Deployment. Every test
- * stage sets the build result to FAILURE the moment it fails — via catchError, so that
- * the reporting stages still run — and the downstream stages refuse to run at all unless
- * the result is still SUCCESS. A red pipeline therefore cannot release an image and
- * cannot deploy, structurally rather than by convention.
+ * Docker Build, and only a green build of a vX.Y.Z TAG can publish an image or
+ * deploy one. Every test stage sets the build result to FAILURE the moment it fails —
+ * via catchError, so that the reporting stages still run — and the downstream stages
+ * refuse to run at all unless the result is still SUCCESS. A red pipeline therefore
+ * cannot release an image and cannot deploy, structurally rather than by convention.
  *
- * Long operational sequences are not written here. Every environment step — start the
- * database, start the application, wait for health, run the browser suite, collect
- * diagnostics, stop the environment — is a script under scripts\ci\, so it can be read,
- * run, and fixed without touching this file, and so a developer runs exactly what CI
- * runs.
+ * What a given revision does, in full:
+ *
+ *   ref                        CI   image build  publish  deploy
+ *   feature/ fix/ docs/ ...    yes  yes (local)  no       no
+ *   develop                    yes  yes (local)  no       no
+ *   tag vX.Y.Z                 yes  yes          yes      if DEPLOY_ENV is not none
+ *
+ * The image build on a non-release branch is deliberately not optional. It is the
+ * only thing that proves the Dockerfile still builds, and a Dockerfile that has
+ * quietly stopped building is a defect that would otherwise be discovered on the
+ * day someone tries to release.
+ *
+ * Long operational sequences are not written here. Every environment step — start
+ * the database, start the application, wait for health, run the browser suite,
+ * collect diagnostics, stop the environment, identify the release, log in, publish,
+ * deploy, smoke test — is a script under scripts\ci\ or scripts\ops\, so it can be
+ * read, run, and fixed without touching this file, and so a developer runs exactly
+ * what CI runs.
  */
 pipeline {
     agent { label 'windows' }
+
+    environment {
+        // ------------------------------------------------------------------
+        // NAMES of entries in the Jenkins credentials store — not values.
+        //
+        // An identifier is configuration, which is why it is written down
+        // where it can be read and reviewed. The value it refers to is a
+        // secret, which is why it appears nowhere in this repository: the
+        // stages below bind it into the environment of one stage, for the
+        // length of that stage, and nothing else can read it (CLAUDE.md §8).
+        // ------------------------------------------------------------------
+        DOCKERHUB_CREDENTIALS_ID = 'dockerhub-credentials'
+        DEPLOY_SSH_CREDENTIALS_ID = 'deploy-ssh-key'
+
+        // The registry images are published to. Docker Hub, per the release
+        // brief. Written down so that a `docker login` and a `docker push` in
+        // this pipeline cannot disagree about which host they mean.
+        REGISTRY = 'docker.io'
+
+        // The image name the Docker Build stage tags locally, before the
+        // Publish stage re-tags it into the registry path. It matches the Maven
+        // artifactId, so an image found on a machine names the artefact it came
+        // from.
+        LOCAL_IMAGE = 'online-assignment-portal'
+    }
 
     options {
         // Wall-clock on every console line, so a stage that quietly got slower is visible.
@@ -48,6 +93,44 @@ pipeline {
         // SCM definition has exactly one home.
         skipDefaultCheckout()
     }
+
+    parameters {
+        // ------------------------------------------------------------------
+        // The one environment setting this pipeline is parameterised by, and
+        // the only input that decides WHERE a release goes.
+        //
+        // It exists rather than being hard-coded because deploying is not the
+        // same decision as releasing. Publishing an image is idempotent and
+        // reversible; pointing a host at it is neither, and which host is a
+        // decision that belongs to a person, on the day, rather than to a stage
+        // that runs at midnight.
+        //
+        // Jenkins chooses the first entry by default, so an ordinary release
+        // lands in staging; production is an explicit selection. `none` publishes
+        // the image and deploys nothing, which is what to choose when the release
+        // is being staged for someone else to deploy.
+        // ------------------------------------------------------------------
+        choice(name: 'DEPLOY_ENV',
+               choices: ['staging', 'production', 'none'],
+               description: 'Where a tagged release is deployed. Ignored by every non-release build. `none` publishes the image without deploying it.')
+
+        string(name: 'IMAGE_REPOSITORY',
+               defaultValue: '',
+               description: 'Docker Hub repository to publish to, as <account>/<name>. REQUIRED for a release. Deliberately has no default: a guessed account name is a push to the wrong repository.')
+
+        string(name: 'DEPLOY_HOST',
+               defaultValue: '',
+               description: 'The deployment host as user@host. REQUIRED when DEPLOY_ENV is not `none`. Has no default on purpose - a deployment aimed at the wrong host by an unset variable is the failure the empty default prevents.')
+
+        string(name: 'DEPLOY_BASE_URL',
+               defaultValue: '',
+               description: 'Origin the smoke test requests, such as http://portal.example.com:8080. Optional; derived from DEPLOY_HOST and APP_HOST_PORT when empty.')
+
+        string(name: 'RELEASE_VERSION',
+               defaultValue: '',
+               description: 'Optional, and an assertion rather than an input. When set it must equal the version on the git tag of this commit, and the build fails when it does not. It can never introduce a version: the git tag is authoritative.')
+    }
+
 
     stages {
 
@@ -173,6 +256,65 @@ pipeline {
             }
         }
 
+        stage('Release Version') {
+            // Step 1 of the release process: decide whether this build is a release,
+            // and of what.
+            //
+            // The answer comes from the GIT TAG and from nothing else. A tag is
+            // created deliberately, on a commit that has already passed CI, and it
+            // stays attached to that commit forever — which is what makes a release
+            // reproducible and a rollback a version that can be named again. A
+            // version typed into a build form has none of those properties.
+            //
+            // `RELEASE_VERSION` is a parameter, but it is an assertion rather than
+            // an input: when set it must agree with the tag, and the script fails
+            // the build when it does not. It can never introduce a version.
+            //
+            // See scripts\ops\release-version.cmd for the rules, including what
+            // happens to a tag that is not vX.Y.Z.
+            steps {
+                bat 'scripts\\ops\\release-version.cmd'
+                script {
+                    // The script writes a FILE, not an environment variable: Jenkins
+                    // runs every `bat` step in its own cmd.exe, so nothing survives
+                    // from one step to the next. Absence of the file is the negative
+                    // answer — a revision that is not a release.
+                    def releaseVersion = fileExists('target/release-version.txt')
+                            ? readFile('target/release-version.txt').trim()
+                            : ''
+                    def shortCommit = (env.GIT_COMMIT ?: 'nogit').take(7)
+
+                    env.RELEASE_VERSION = releaseVersion
+                    env.IS_RELEASE = (releaseVersion ==~ /\d+\.\d+\.\d+/) ? 'true' : 'false'
+
+                    // The tag the image carries. A release is tagged with its
+                    // version and nothing else — never `latest`, which is a pointer
+                    // that moves and therefore not a version at all (ADR-006). A
+                    // build that is not a release still gets an image, tagged with
+                    // the commit, so the Dockerfile is compiled on every green build
+                    // and a Dockerfile that has stopped building is caught here
+                    // rather than on release day.
+                    env.IMAGE_TAG = env.IS_RELEASE == 'true' ? releaseVersion : shortCommit
+
+                    // The build parameters, copied into the environment explicitly
+                    // so the scripts read them the same way whether they were set
+                    // by Jenkins, by an operator, or by this block. `DEPLOY_ENV` has
+                    // the same default the parameter does: an unset environment must
+                    // mean "deploy nowhere", never "deploy somewhere".
+                    env.DEPLOY_ENV = params.DEPLOY_ENV ?: 'none'
+                    env.IMAGE_REPOSITORY = params.IMAGE_REPOSITORY?.trim() ?: ''
+                    env.DEPLOY_HOST = params.DEPLOY_HOST?.trim() ?: ''
+                    env.DEPLOY_BASE_URL = params.DEPLOY_BASE_URL?.trim() ?: ''
+
+                    if (env.IS_RELEASE == 'true') {
+                        echo "Release: version ${releaseVersion}, image tag ${env.IMAGE_TAG}, target environment ${env.DEPLOY_ENV}."
+                    } else {
+                        echo "Not a release: this revision carries no vX.Y.Z tag. Image tag ${env.IMAGE_TAG}; nothing will be published or deployed."
+                    }
+                }
+            }
+        }
+
         stage('Docker Build') {
             // The quality gate, expressed as a precondition rather than a convention.
             //
@@ -181,16 +323,15 @@ pipeline {
             // never evaluates this stage's steps, so no image is built and nothing can carry a
             // bad revision forward.
             //
-            // The second condition — that a Dockerfile exists — is what kept this stage honest
-            // while there was none. It was skipped visibly ("Stage skipped due to when
-            // conditional") rather than passing while doing nothing, and it was written to
-            // activate by itself the day the file appeared. That day is now: `Dockerfile` is in
-            // the tree, so this stage runs whenever the build is green — and still never when it
-            // is not, which is the point.
+            // The second condition — that a Dockerfile exists — kept this stage honest while
+            // there was none: it was skipped visibly rather than passing while doing nothing.
+            // `Dockerfile` is in the tree now, so this stage runs whenever the build is green —
+            // and still never when it is not, which is the point.
             //
-            // CLAUDE.md §13 sequences Milestone 5 after a green `clean verify`, and that
-            // precondition is still unmet. The image this builds is therefore written and not
-            // proven; docs/operations/docker.md §8 lists what has not been run.
+            // The image is tagged with the release version on a release, and with the commit
+            // on anything else. It is built but not published here: publishing is a separate
+            // stage and a separate decision, so that a failure to reach the registry is not
+            // mistaken for a failure to compile the image.
             when {
                 allOf {
                     expression { currentBuild.currentResult == 'SUCCESS' }
@@ -198,39 +339,120 @@ pipeline {
                 }
             }
             steps {
-                // Built locally and tagged with the revision, so the image can be traced to the
-                // commit that produced it. No registry push and no credentials: publishing to a
-                // registry is part of the delivery pipeline (CLAUDE.md §13), and a push to a
-                // registry the pipeline has no business holding is how an image escapes review.
+                // `--build-arg APP_VERSION` bakes the version into the image, so the
+                // running application can report which release it is — the mechanism
+                // that lets a deployment prove it deployed the release it meant to
+                // (Dockerfile, application.yml, scripts\ops\smoke-test.ps1).
                 //
-                // The tag is interpolated by Groovy rather than expanded by cmd, so an unset
-                // GIT_COMMIT fails the pipeline's own evaluation with a readable message instead
-                // of producing a literal `%GIT_COMMIT%` tag that docker rejects.
-                bat "docker build -t online-assignment-portal:${env.GIT_COMMIT} ."
+                // The tag and the argument come from the same Groovy variable in the
+                // same command, so the image cannot be tagged one version and identify
+                // itself as another.
+                //
+                // The values are interpolated by Groovy rather than expanded by cmd, so
+                // an unset variable fails the pipeline's own evaluation with a readable
+                // message instead of producing a literal `%IMAGE_TAG%` that docker rejects.
+                bat "docker build --build-arg APP_VERSION=${env.IMAGE_TAG} -t ${env.LOCAL_IMAGE}:${env.IMAGE_TAG} ."
             }
         }
 
-        stage('Deployment') {
-            // The far side of the quality gate, and deliberately empty.
+        stage('Publish Image') {
+            // Steps 2 to 4 of the release process: authenticate, tag into the registry
+            // path, and push the versioned image.
             //
-            // A stage that cannot run today is still worth having here, because the gate is a
-            // statement about *this* stage: it is skipped for exactly the reason Docker Build
-            // is, and the defect drill in docs/evidence/defect-demonstration.md observes both
-            // being skipped on a failed run. Deployment itself — Ansible provisioning, the
-            // health check after it, and the rollback path — is Milestone 5 work that
-            // CLAUDE.md §13 withholds until there is a green build to deploy.
+            // Gated on a release, and that gate is what "do not deploy untagged feature
+            // builds" means in practice: no vX.Y.Z tag, no published image, and therefore
+            // nothing for a deployment to pull. The gate is the same expression the
+            // Deploy stage uses, so the two cannot disagree about what a release is.
+            //
+            // `currentBuild.currentResult == 'SUCCESS'` is repeated here rather than
+            // relied upon from the previous stage: every gate in this file is
+            // self-contained, so moving a stage cannot silently disable one.
             when {
                 allOf {
                     expression { currentBuild.currentResult == 'SUCCESS' }
-                    // Either layout, so that landing the playbooks does not also depend on
-                    // guessing where this file thinks they will live: `ansible/` is what the
-                    // README's repository map shows, `deploy/ansible/` is where the deployment
-                    // assets sit. Whichever appears first activates the stage.
-                    expression { fileExists('ansible') || fileExists('deploy/ansible') }
+                    expression { env.IS_RELEASE == 'true' }
                 }
             }
             steps {
-                echo 'Deployment provisioning is Milestone 5 work (CLAUDE.md §13); nothing runs here yet.'
+                script {
+                    // A release with nowhere to publish fails here rather than being
+                    // skipped. Skipping would be the silent outcome: the tag would
+                    // produce a green build that published nothing and deployed
+                    // nothing, which is the one result a release must never report.
+                    if (!env.IMAGE_REPOSITORY) {
+                        error "IMAGE_REPOSITORY is not set. A release publishes to a Docker Hub repository, as <account>/<name>; set the build parameter before releasing."
+                    }
+                }
+
+                // The credential is bound here and nowhere else, so it exists in the
+                // environment of this stage for the length of this stage. `docker-login.cmd`
+                // reads the two variables and passes the token to docker over a pipe —
+                // never in an argument, never in a file.
+                withCredentials([usernamePassword(credentialsId: env.DOCKERHUB_CREDENTIALS_ID,
+                                                  usernameVariable: 'DOCKERHUB_USERNAME',
+                                                  passwordVariable: 'DOCKERHUB_TOKEN')]) {
+                    bat 'scripts\\ops\\docker-login.cmd'
+                    bat 'scripts\\ops\\publish-image.cmd'
+                }
+            }
+            post {
+                always {
+                    // `docker login` leaves the credential in the agent's ~/.docker/config.json,
+                    // which outlives the workspace and therefore outlives `cleanWs()`. The logout
+                    // is in the stage's own post block rather than the build's, so it runs when
+                    // this stage ran and not on the forty builds a day that never logged in.
+                    //
+                    // Best-effort: a build that has already failed must not go redder over a
+                    // logout, and an agent with no stored credential is the state we want anyway.
+                    bat 'docker logout docker.io'
+                }
+            }
+        }
+
+        stage('Deploy') {
+            // Steps 5 to 11 of the release process: connect to the host, pull the exact
+            // version, replace the container, wait for health, smoke test, roll back on
+            // failure, and report.
+            //
+            // Three conditions, all of which must hold, and each of which rules out a
+            // different way of putting the wrong thing in front of a user:
+            //
+            //   - the build is green, so the release was tested;
+            //   - the revision is a vX.Y.Z tag, so the release was deliberate;
+            //   - DEPLOY_ENV is not `none`, so somebody chose to deploy it, here.
+            //
+            // The whole sequence — including the rollback — is
+            // scripts\ops\deploy-release.cmd. It is a script rather than steps in this
+            // file because a deployment that goes wrong is a deployment somebody has to
+            // read and re-run, and that is impossible when the sequence exists only as
+            // a stage definition.
+            when {
+                allOf {
+                    expression { currentBuild.currentResult == 'SUCCESS' }
+                    expression { env.IS_RELEASE == 'true' }
+                    expression { env.DEPLOY_ENV != null && env.DEPLOY_ENV != 'none' }
+                }
+            }
+            steps {
+                script {
+                    if (!env.DEPLOY_HOST) {
+                        error "DEPLOY_ENV is '${env.DEPLOY_ENV}' but DEPLOY_HOST is empty. Set the user@host build parameter, or set DEPLOY_ENV to `none` to publish without deploying."
+                    }
+                }
+
+                // `sshagent` holds the key; this file never sees it. The agent's own
+                // known_hosts must already hold the host key — the deploy script does not
+                // disable host verification, and the first run against an unprovisioned
+                // agent fails with "Host key verification failed", which is the correct
+                // outcome rather than an obstacle (docs/operations/docker-cd.md §4).
+                sshagent(credentials: [env.DEPLOY_SSH_CREDENTIALS_ID]) {
+                    // catchError so the reporting stages still run: the deploy script has
+                    // already rolled the host back by the time this returns, and the
+                    // report explaining why is what a person needs from the build.
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        bat 'scripts\\ops\\deploy-release.cmd'
+                    }
+                }
             }
         }
     }
@@ -259,6 +481,18 @@ pipeline {
             // every downstream job that consumes it.
             archiveArtifacts artifacts: 'target/*.jar', fingerprint: true, allowEmptyArchive: true
             archiveArtifacts artifacts: 'target/ci-diagnostics/**', allowEmptyArchive: true
+
+            // The release record: which version was published, which environment it went
+            // to, whether the smoke test passed, and — when it went wrong — the host's
+            // own output and the version the rollback restored.
+            //
+            // Archiving these unconditionally, with allowEmptyArchive, is what makes a
+            // failed deployment diagnosable after the workspace is gone. A build that
+            // deploys nothing produces none of these files and is not the worse for it.
+            archiveArtifacts artifacts: 'target/deployment-report.txt', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'target/smoke-test.txt', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'target/ci-deploy.log', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'target/release-version.txt', allowEmptyArchive: true
 
             // Leave the agent clean for the next build, and last of all: everything above reads
             // the workspace. Windows agents hold file locks, and a tidy workspace is what stops

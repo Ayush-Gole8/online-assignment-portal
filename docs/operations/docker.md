@@ -3,7 +3,8 @@
 **Related:** [ADR-002](../adr/ADR-002-spring-boot-embedded-tomcat.md) ·
 [ADR-004](../adr/ADR-004-filesystem-volume-and-db-metadata.md) ·
 [ADR-006](../adr/ADR-006-docker-compose-composition.md) · [Jenkins CI](jenkins-ci.md) ·
-[Toolchain](toolchain.md) · [`Dockerfile`](../../Dockerfile) · [`compose.yaml`](../../compose.yaml)
+[Docker CD](docker-cd.md) · [Toolchain](toolchain.md) · [`Dockerfile`](../../Dockerfile) ·
+[`compose.yaml`](../../compose.yaml)
 
 ---
 
@@ -13,9 +14,13 @@ The deliverable is one executable JAR, packaged into one image, run as one conta
 database. This document describes the image, the composition that runs it, and the container
 lifecycle an operator drives by hand.
 
-It does **not** describe a deployment. Provisioning a host, publishing the image to a registry,
-and rolling a revision back are Milestone 5 work that has not been written
-([CLAUDE.md §13](../../CLAUDE.md)).
+It does **not** describe a deployment. Publishing the image to a registry, reaching a host,
+putting a versioned release on it, verifying it and rolling it back are a separate process with a
+separate document: [`docker-cd.md`](docker-cd.md). The boundary is the one this file already
+draws — `compose.yaml` here builds from the working tree, for a developer; `deploy/compose.prod.yaml`
+there pulls a published version, for a host. **Neither has been executed**, including everything
+in the delivery process; both documents carry their own unverified-claims tables (§8 here,
+`docker-cd.md` §8 there).
 
 ## 2. The image
 
@@ -90,6 +95,7 @@ patch release. That is the residual gap recorded in §8.
 | **Reproducible startup command** | `ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]` — exec form, no shell, no expansion, no arguments assembled at run time |
 | **Graceful JVM/container behaviour** | Exec-form entry point so the JVM is pid 1 and receives SIGTERM; `STOPSIGNAL SIGTERM` stated explicitly; `server.shutdown: graceful` already set in `application.yml`; `-XX:MaxRAMPercentage=75.0` so the heap follows the container's memory limit rather than the host's |
 | **Runs the same JAR Maven produced** | The `COPY` names `target/online-assignment-portal-0.0.1-SNAPSHOT.jar` exactly — the artefact `./mvnw package` writes |
+| **Identifies the release it is** | `ARG APP_VERSION=unknown` / `ENV APP_VERSION=${APP_VERSION}`, so the version is baked into the artefact at build time and published at `/actuator/info`. The release pipeline passes the same value as the image tag; `unknown` is the honest answer for a build that was given none. See [docker-cd.md](docker-cd.md) §6 |
 
 One package is added beyond the base image: **`curl`**, for the `HEALTHCHECK`. The Temurin images
 ship no HTTP client, so a probe written against one would not run, and a container with no
@@ -225,8 +231,9 @@ docker images online-assignment-portal
 ### 2. `tag` — give it the name a given revision is known by
 
 A tag is a label on an image id, not a copy: the two names below refer to the same layers. The
-pipeline tags with the commit (`online-assignment-portal:${GIT_COMMIT}`, `Jenkinsfile`), so an image
-found on a machine can be traced back to the revision that produced it.
+pipeline tags with `IMAGE_TAG` (`Jenkinsfile`, `Docker Build` stage) — the release version on a
+tagged revision, the abbreviated commit on anything else — so an image found on a machine names
+both the revision that produced it and, for a release, the version `APP_VERSION` was baked from.
 
 ```bash
 docker tag online-assignment-portal:local online-assignment-portal:0.0.1-SNAPSHOT
@@ -449,7 +456,7 @@ record the output under [`docs/evidence/`](../evidence/) as
 | --- | --- |
 | **Nothing here has run.** §8. | The commands in §3, §4 and §5, once. |
 | **The base image is pinned by tag, not digest.** A patch release can change under a rebuild. | Resolve the digest (§2.1) and record it. |
-| **No registry.** The image is built and tagged locally; nothing publishes it, and the pipeline pushes to no registry — deliberately, because a pipeline holding registry credentials it has no business holding is how an image escapes review ([jenkins-ci.md](jenkins-ci.md)). | Milestone 5, with Ansible driving a deployment. |
-| **`app` is rebuilt, not pulled, by a deployment.** `compose.yaml` declares `build:` for the local case, and a deployment that wants the tested image rather than a rebuild must run `docker compose up -d --no-build` with `APP_IMAGE_TAG` set to the commit. | A deployment composition that references the image only. |
+| **No registry for the local stack.** This document builds and tags an image locally; publishing it is the release pipeline's job and is not part of the local lifecycle. | Closed for releases: the `Publish Image` stage pushes `IMAGE_REPOSITORY:<version>` to Docker Hub — [docker-cd.md](docker-cd.md) §3. The local path here remains deliberately unpushed. |
+| **`app` is rebuilt, not pulled, in `compose.yaml`.** That is correct for the local case — it is how a working-tree change reaches a container without a release. | Closed for deployments: `deploy/compose.prod.yaml` declares `image:` only and no `build:`, and `deploy-on-host.sh` runs `up -d --no-build`, so a deployment uses the pushed image or fails — [docker-cd.md](docker-cd.md) §3 and §5. |
 | **No backup or restore procedure for either volume.** A volume that has never been restored is an untested assumption, and both of this system's copies of a submission live on one. | [ADR-006](../adr/ADR-006-docker-compose-composition.md) already lists this as a follow-up. |
 | **`ADMIN` has no admin UI**, and the stack seeds no accounts, so a fresh local stack has no way in until seeding is enabled or a user is created. | Deliberate; see §7. |

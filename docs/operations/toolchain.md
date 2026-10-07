@@ -55,7 +55,8 @@ Until a row is filled in, treat it as **unverified** and do not claim the prereq
 | Tool | Required | Verification command | Actual version | Verified | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Docker Engine | 24+ | Testcontainers handshake | **29.6.1** (API 1.55) | 2026-10-01 | Reported by Testcontainers: `Server Version: 29.6.1`, `Operating System: Docker Desktop (containerized)`, 7794 MB total memory |
-| Docker Compose | v2 (`docker compose`) | `docker compose version` | `TBD` — **unverified** | — | The v2 plugin form, not the legacy `docker-compose` binary |
+| Docker Compose | v2 plugin (`docker compose`), recent enough to carry `up --wait` | `docker compose version` | `TBD` — **unverified** | — | The v2 plugin form, not the legacy `docker-compose` binary. The release process depends on `docker compose up -d --wait` ([`docker-cd.md` §3](docker-cd.md) step 8), which the legacy binary does not have. The Validate stage prints this version on every build, so the first Jenkins run records it |
+| Docker registry | Docker Hub (`docker.io`) | `docker login docker.io` | **Declared** — Docker Hub | — | Where releases are published ([`docker-cd.md`](docker-cd.md) §2). The *host* pulls from it, the *agent* pushes to it. `IMAGE_REPOSITORY` is host-owned; the pipeline's account is supplied per release, never committed |
 | Docker Buildx | Current | `docker buildx version` | `TBD` — **unverified** | — | Needed for multi-stage, layer-cached builds |
 | Runtime base image | Java 21 (LTS), maintained, not `latest` | `docker buildx imagetools inspect eclipse-temurin:21-jre` | **Declared** — `eclipse-temurin:21-jre` | — | Eclipse Temurin. **Pinned by tag, not by digest**, so a patch release can still change under a rebuild — the residual gap [`docker.md` §2.1](docker.md) records, with the command that closes it |
 | MySQL image | 8.4 (LTS) | `docker image inspect mysql:8.4` | **Declared** — `mysql:8.4` | — | Declared in `compose.yaml`. The Compose service itself has not been started — the integration tests run MySQL through Testcontainers instead |
@@ -68,9 +69,10 @@ Until a row is filled in, treat it as **unverified** and do not claim the prereq
 
 | Tool | Required | Verification command | Actual version | Verified | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Jenkins | 2.4xx LTS or later | Jenkins UI → *About Jenkins* | `TBD` — **unverified** | — | Recorded from the controller, not a local install |
-| Ansible | 2.16+ | `ansible --version` | `TBD` — **unverified** | — | Control node; the managed host needs only SSH and Python |
-| Git | 2.40+ | `git --version` | `TBD` — **unverified** | — | |
+| Jenkins | 2.4xx LTS or later | Jenkins UI → *About Jenkins* | `TBD` — **unverified** | — | Recorded from the controller, not a local install. Plugins required by the release stages: **Credentials Binding** and **SSH Agent**, in addition to those listed above |
+| OpenSSH client (`ssh`, `scp`) | Any version with `BatchMode` | `ssh -V` | `TBD` — **unverified** | — | Used by the deploy script to reach the host. The **host key must be in the agent's `known_hosts`**: verification is not disabled and must not be ([`docker-cd.md` §4](docker-cd.md)) |
+| Ansible | 2.16+ | `ansible --version` | `TBD` — **unverified** | — | Control node; the managed host needs only SSH and Python. **Not yet used by anything** — the release process places two files with `scp` and runs one script with `ssh`, which is not provisioning ([`docker-cd.md` §9](docker-cd.md)) |
+| Git | 2.40+ | `git --version` | `TBD` — **unverified** | — | Must be able to read tags: the **Release Version** stage runs `git describe --tags --exact-match HEAD` |
 
 ## 6. Testing and quality
 
@@ -240,3 +242,13 @@ code that has not been written.
 > now been executed — that is what runs 2 and 3 did — but they have not been executed *to green*.
 > The last green build it cites remains Milestone 2's, which is why the tool-version rows in §2–§6
 > are still marked *unverified* at this revision.
+
+**Added 2026-10-07, and not run by any build:** the release and deployment tooling —
+`scripts/ops/`, `deploy/compose.prod.yaml`, `deploy/deploy-on-host.sh`. No image has been pushed,
+no host contacted, no rollback fired, and **no command in this section has been executed for any of
+them**. The Docker Compose, OpenSSH, Docker Hub and registry rows in §4–§5 were added to name a
+requirement that the release process depends on, not to record a version anyone observed; they
+remain *unverified* for the same reason as every other row here. Nothing in this document moves
+from *unverified* to a real version until a `vX.Y.Z` tag is built end to end and the run recorded
+under [`docs/evidence/`](../evidence/README.md) — which still cannot happen before a green
+`./mvnw clean verify`.

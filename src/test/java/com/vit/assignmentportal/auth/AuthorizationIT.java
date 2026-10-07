@@ -1,5 +1,6 @@
 package com.vit.assignmentportal.auth;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -106,6 +107,68 @@ class AuthorizationIT extends MySqlIntegrationTest {
     void servesTheHealthEndpointToAnonymousVisitors() throws Exception {
         mockMvc.perform(get("/actuator/health"))
                 .andExpect(status().isOk());
+    }
+
+    /**
+     * The build-identity endpoint answers without a session.
+     *
+     * <p>It is what the post-deployment smoke test reads to confirm that the release
+     * which was deployed is the release that is answering
+     * ({@code scripts/ops/smoke-test.ps1}). A deployment that had to hold a
+     * credential to ask that question would have to store one on the machine it is
+     * checking, which is the trade this endpoint exists to avoid.
+     */
+    @Test
+    void servesTheBuildIdentityEndpointToAnonymousVisitors() throws Exception {
+        String body = mockMvc.perform(get("/actuator/info"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        // Asserted as substrings rather than with a JSON-path expression: the
+        // claim is about what the document contains, not about the shape of the
+        // library that reads it.
+        assertThat(body).contains("\"version\"").contains("\"environment\"");
+    }
+
+    /**
+     * The endpoint publishes the build's identity and nothing else.
+     *
+     * <p>This is the assertion that makes permitting it defensible. Exposing
+     * {@code /actuator/info} widens what an anonymous visitor can read, and
+     * {@code application.yml} enables the property-based contributor to populate
+     * it — so the bound on that widening is a rule about what may be placed under
+     * {@code info.}, and a rule is worth exactly what an assertion makes it worth.
+     * The four strings below are the values that would appear here the moment
+     * something leaks the datasource, the storage root, or the session policy
+     * into that namespace.
+     */
+    @Test
+    void publishesNothingButTheBuildIdentityFromTheInfoEndpoint() throws Exception {
+        String body = mockMvc.perform(get("/actuator/info"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body)
+                .doesNotContain("jdbc")
+                .doesNotContain("password")
+                .doesNotContain("DB_URL")
+                .doesNotContain("uploads");
+    }
+
+    /**
+     * Permitting {@code /actuator/info} did not permit the actuator as a whole.
+     *
+     * <p>{@code /actuator/env} publishes the resolved environment. A rule written
+     * as {@code /actuator/**} would have opened it, and would keep opening every
+     * endpoint a future exposure setting turns on. This case is what makes the
+     * narrow matcher in {@code SecurityConfiguration} a fact rather than a
+     * preference.
+     */
+    @Test
+    void refusesOtherActuatorEndpointsToAnonymousVisitors() throws Exception {
+        mockMvc.perform(get("/actuator/env"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/login"));
     }
 
     @Test

@@ -304,6 +304,18 @@ unproven: the 2026-10-02 runs below are the first time any of this code has been
 on the repository owner's instruction and recorded there and in
 [`docs/operations/docker.md` §8](docs/operations/docker.md).
 
+**Added on 2026-10-07, and unrun:** the rest of the release half of Milestone 5 — the Docker Hub
+release process. `deploy/compose.prod.yaml`, `deploy/env.production.example`,
+`deploy/deploy-on-host.sh`, seven scripts under `scripts/ops/`, the `Release Version` /
+`Docker Build` / `Publish Image` / `Deploy` stages of `Jenkinsfile`, and
+[`docs/operations/docker-cd.md`](docs/operations/docker-cd.md). **No image has been built by this
+pipeline, no push attempted, no deployment host contacted, and no rollback fired.** A version is
+identified by a `vX.Y.Z` git tag and by nothing else; a feature branch reaches neither the registry
+nor a host; `latest` is never produced. The version is baked into the image at build time and
+published at `/actuator/info`, which is what lets the post-deployment smoke test prove that the
+release deployed is the release answering. `docker-cd.md` §8 lists every unexercised claim one by
+one. This is a second deliberate divergence from §13's sequencing, on the same instruction.
+
 The build *has* moved since Milestone 2, and three `mvn clean verify` runs on **2026-10-02** — one
 without Docker, two with — between them report where the project actually stands. They also found
 three real defects, which is the strongest argument in this repository for running the suite rather
@@ -395,6 +407,24 @@ it — which is also the first milestone whose tests exercise a state transition
   runs no Maven, so it is not a second build process.
 - `.dockerignore` — admits exactly one file into the build context, the executable JAR.
 - `docs/operations/docker.md` — the image, the stack, and the container lifecycle.
+- `docs/operations/docker-cd.md` — the release process: the ref → action rules, the credentials, the
+  agent and host prerequisites, the host `.env` contract, the version-identification mechanism, the
+  smoke test, and the rollback. Its §8 is a claim-by-claim list of what has not been run.
+- `deploy/compose.prod.yaml` — the **deployment** composition, distinct from `compose.yaml`: it
+  references a published image by tag and declares no `build:`, so a host runs the tested artefact or
+  fails. The database is not published on a host port and no `APP_SEED_*` variable is passed, so a
+  deployment cannot seed a demo account.
+- `deploy/env.production.example` — the template for a host's `.env`. Named without a leading dot
+  because `.gitignore`'s `.env.*` would otherwise ignore it. It draws the ownership line: the
+  database credentials and `IMAGE_REPOSITORY` are the **host's**, and the pipeline rewrites exactly
+  two non-secret keys (`APP_IMAGE_TAG`, `APP_ENVIRONMENT`).
+- `deploy/deploy-on-host.sh` — the host-side half of a release, run over SSH. It records the version
+  currently running *before* changing anything, rewrites those two keys, pulls the exact tag, and
+  replaces the container with `--no-build --remove-orphans --wait`.
+- `scripts/ops/` — `env.cmd` (shared defaults, credential **IDs** only), `release-version.cmd` (the
+  tag is the version), `docker-login.cmd` (token over stdin, never an argument), `publish-image.cmd`
+  (refuses `latest`), `deploy-release.cmd` (the deployment and its rollback), `smoke-test.ps1` /
+  `smoke-test.cmd`.
 - `src/main/resources/application.yml` — externalised configuration, no secrets.
 
 **`auth/` — identity (Milestone 2).** `User` entity and repository, `UserService`, and a
@@ -451,11 +481,17 @@ exercises each constraint by inserting rows the service would never produce.
   different concern from *security* events.
 - **No resubmission.** A rejection is terminal in the MVP. Rejected work is not resubmitted, and
   nothing resets a submission to `SUBMITTED`.
-- **No registry, no Ansible playbooks, no deployment, no rollback path.** The continuous-integration
-  half of the pipeline now exists — `Jenkinsfile`, the Selenium suite, and a `Dockerfile` that
-  packages the JAR into an image. The *delivery* half is still ahead, and CLAUDE.md §13's
-  precondition for it is still unmet: no `clean verify` has been green since Milestone 2. The image
-  is **written, not built**; `docs/operations/docker.md` §8 lists what has not been run.
+- **No Ansible, no host provisioning, and no deployment that has ever run.** The *delivery* half of
+  the pipeline is now written — a versioned image published to Docker Hub, `ssh`/`scp` to a host,
+  `docker compose pull` + `up --no-build --wait`, a health check from the agent, a smoke test that
+  asserts the running version, and a rollback to the previous version. What is still absent is
+  **provisioning**: no playbooks, no package installation, no firewall, no TLS. The host-side
+  sequence places two files and runs one script (recorded in
+  [`docs/operations/docker-cd.md` §9](docs/operations/docker-cd.md)). Every one of the new
+  mechanisms is **written, not run**, and CLAUDE.md §13's precondition for the delivery work — a
+  green `clean verify` — is still unmet, so nothing here has been exercised. The image is
+  **written, not built**; `docs/operations/docker.md` §8 and `docker-cd.md` §8 list what has not
+  been run.
 - **No admin UI.** `ADMIN` exists as a role, gates `/admin/**`, and can review; no management
   screens ship.
 
@@ -539,18 +575,25 @@ tools they loaded, not the version of every tool listed in that document, so mos
 still marked *unverified* at this revision.
 
 **Milestone 5 — the delivery pipeline.** The application is now as complete as the MVP needs it to
-be. The continuous-integration half of the pipeline exists: `Jenkinsfile` stages for build, unit,
-integration and Selenium E2E tests, and a multi-stage `Dockerfile` that packages the Maven artefact
-into a production image. What Milestone 5 still carries: image publication to a registry, Ansible
-provisioning and deployment, a health check after it, and a rollback path; and — if it is to be
-claimed — the FR-24 audit trail carried over above.
+be. The pipeline now carries both halves: continuous integration — build, unit, integration and
+Selenium E2E stages, and a multi-stage `Dockerfile` that packages the Maven artefact into a
+production image — and, added 2026-10-07, the release process: a `vX.Y.Z` tag is the version, the
+image is published to Docker Hub under it, and a host runs that exact version or the previous one is
+restored. `deploy/`, `scripts/ops/` and [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)
+are the artefacts.
+
+What Milestone 5 still carries: **Ansible provisioning and host management** (no playbooks, no TLS,
+no backup story — [`docker-cd.md` §9](docs/operations/docker-cd.md)); and — if it is to be claimed
+— the FR-24 audit trail carried over above.
 
 **Nothing in Milestone 5 should be trusted before the Milestone 4 build is green**, and that
-precondition is still unmet. The `Dockerfile` and `compose.yaml` were added ahead of it on the
-repository owner's instruction, which is a deliberate divergence from the sequencing this section
-describes. The consequence is recorded rather than glossed: the image has never been built, the
-stack has never been started, and every claim about either is *written, not proven*
-([`docs/operations/docker.md` §8](docs/operations/docker.md) lists them one by one). Creating the
-`Dockerfile` also satisfies the second guard on the `Jenkinsfile`'s `Docker Build` stage, so that
-stage now runs on a green build instead of skipping — the `Deployment` stage still skips, because no
-Ansible assets exist.
+precondition is still unmet. Every Milestone 5 artefact was added ahead of it on the repository
+owner's instruction, which is a deliberate divergence from the sequencing this section describes.
+The consequence is recorded rather than glossed: the image has never been built, the stack has never
+been started, no image has been pushed, no host has been contacted, no rollback has fired, and every
+claim about any of them is *written, not proven* ([`docs/operations/docker.md` §8](docs/operations/docker.md)
+and [`docker-cd.md` §8](docs/operations/docker-cd.md) list them one by one). Creating the
+`Dockerfile` also removed the guard that had made the `Docker Build` stage skip, so that stage now
+runs on every green build and fails it when the image does not build; the old empty `Deployment`
+stub has been replaced by a **`Deploy`** stage gated on a green build **and** a `vX.Y.Z` tag **and**
+a chosen `DEPLOY_ENV`.
