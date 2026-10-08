@@ -1,0 +1,289 @@
+---
+# ===========================================================================
+# The portal on a provisioned host: its directory, its composition, its
+# environment, its volumes and image, its service unit, and a health check.
+#
+# The sequence is ordered so that every step has what it needs when it runs, and
+# so that an interrupted run leaves the host in a state the next run can finish
+# from:
+#
+#   account → directories → compose file → .env → registry login → volumes →
+#   image → systemd unit → flush handlers (reload + restart if configuration
+#   changed) → start → health → version
+#
+# The order of the last four matters. The restart handler is flushed AFTER the
+# unit file exists, because a restart with no unit to restart is a failed run;
+# and BEFORE the service is confirmed started, so that a configuration change is
+# in effect by the time health is asserted.
+#
+# The Docker operations use the `community.docker` modules — desired-state
+# operations against the daemon — rather than `docker` commands. Where a shell
+# command IS used, the task says why in its own comment; §4 of
+# docs/operations/ansible.md lists them together.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# The service account
+# ---------------------------------------------------------------------------
+
+- name: Ensure the service group exists
+  ansible.builtin.group:
+    name: "{{ app_group }}"
+    state: present
+    system: true
+
+- name: Ensure the service account exists
+  # A system account with no login shell and no home directory. It owns the
+  # deployment directory; it does not run the container — that runs as the image's
+  # own uid 1001 (Dockerfile) — and it does not own the uploaded files, which live
+  # in a Docker named volume.
+  ansible.builtin.user:
+    name: "{{ app_user }}"
+    group: "{{ app_group }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+# ---------------------------------------------------------------------------
+# The deployment directory and the persistent host directories
+# ---------------------------------------------------------------------------
+
+- name: Ensure the deployment directory exists
+  ansible.builtin.file:
+    path: "{{ deploy_path }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    # 0750, not 0755: the directory holds `.env`, which contains the database
+    # password. Group-readable is what an operator account needs to read it;
+    # world-readable would disclose the credentials to every account on the host.
+    mode: "0750"
+
+- name: Ensure the persistent host directories exist
+  # On the host's own filesystem, deliberately outside Docker's storage root, so a
+  # `docker system prune -a --volumes` cannot take them with it. The volumes
+  # Docker manages are the NEXT section; these are the directories around them.
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ app_host_directories }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+# ---------------------------------------------------------------------------
+# The composition and the environment
+# ---------------------------------------------------------------------------
+
+- name: Install compose.prod.yaml into the deployment directory
+  # Copied from the repository's deploy/ directory rather than written from a
+  # template: it is THE file the CD pipeline also scp's here on every release
+  # (deploy/deploy-on-host.sh), so a templated copy would be a second version of
+  # the composition — one Ansible writes, one Jenkins overwrites, drifting a line
+  # at a time. There is one composition in this repository (ADR-006: two files each
+  # declaring a database is the drift it exists to prevent) and this role places
+  # that one, addressed from the playbook's own directory rather than duplicated
+  # into the role's files/.
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../deploy/compose.prod.yaml"
+    dest: "{{ deploy_path }}/{{ app_compose_file }}"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    # 0640: readable by the owning group and nobody else. It holds no secret itself
+    # — every value is a `${VAR}` reference — but it names the variables the
+    # deployment reads, which is a map of what to attack.
+    mode: "0640"
+  notify: Restart application stack
+
+- name: Write the deployment environment file
+  # The ONE file on this host that contains secrets, and therefore the one with the
+  # tightest mode. Rendered from a template with `no_log` on the task, so the values
+  # never reach the console or the Ansible log.
+  #
+  # This is the same `.env` the CD pipeline rewrites two keys in on every release
+  # (deploy/deploy-on-host.sh). Ansible writes the whole file; the pipeline edits
+  # APP_IMAGE_TAG and APP_ENVIRONMENT in place. Both are correct, and §4 of
+  # docs/operations/ansible.md records the consequence: re-running this playbook
+  # resets the tag to `app_image_tag`.
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ deploy_path }}/.env"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: "0640"
+  no_log: true
+  notify: Restart application stack
+
+# ---------------------------------------------------------------------------
+# Registry authentication
+# ---------------------------------------------------------------------------
+
+- name: Log in to the container registry
+  # Skipped entirely when no registry credential is configured, which is the
+  # default: a public repository needs no login, and a task that pushes an empty
+  # username at the daemon is a failure that has to be explained.
+  #
+  # `docker_login` is desired-state — it records the credential in the daemon's
+  # config and is idempotent, so a second run with the same credential reports no
+  # change rather than logging in again.
+  community.docker.docker_login:
+    registry: "{{ image_registry }}"
+    username: "{{ registry_username }}"
+    password: "{{ registry_password }}"
+    reauthorize: false
+  when: registry_username | length > 0
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# Persistent volumes
+# ---------------------------------------------------------------------------
+
+- name: Ensure the persistent volumes exist
+  # Named exactly as deploy/compose.prod.yaml names them, so Compose adopts these
+  # rather than creating its own alongside them — which is what makes the database
+  # and the uploaded files survive a release that replaces the application
+  # container (ADR-004).
+  #
+  # `docker_volume` is desired-state: creating a volume that exists is not a
+  # change, and the module is the daemon's own operation rather than a call to the
+  # CLI.
+  community.docker.docker_volume:
+    name: "{{ item }}"
+    state: present
+  loop: "{{ app_volumes }}"
+  loop_control:
+    label: "{{ item }}"
+
+# ---------------------------------------------------------------------------
+# The application image
+# ---------------------------------------------------------------------------
+
+- name: Pull the application image for {{ app_image_tag }}
+  # The exact version tag, never `latest` (ADR-006). The reference is assembled
+  # here from the same two variables the composition interpolates, so Ansible and
+  # Compose cannot pull different images.
+  #
+  # `force_source` is FALSE by default, and that is what makes the second run
+  # converge: with it true, every run would re-pull and report a change even when
+  # the host already holds the image the tag names. It is set true only when an
+  # operator needs the host to converge to a tag that has been re-pointed upstream
+  # — the one case where "the image is present" and "the image is current" differ.
+  community.docker.docker_image:
+    name: "{{ image_repository }}"
+    tag: "{{ app_image_tag }}"
+    source: pull
+    force_source: "{{ app_image_pull_force | bool }}"
+  register: app_image_pull
+  retries: 3
+  delay: 5
+  until: app_image_pull is not failed
+
+# ---------------------------------------------------------------------------
+# The service unit
+# ---------------------------------------------------------------------------
+
+- name: Install the application systemd unit
+  # A host-level service, so the Docker Compose stack is managed the way every
+  # other service on the host is managed:
+  #
+  #   systemctl status assignment-portal
+  #   systemctl restart assignment-portal
+  #
+  # Compose alone cannot do that. `docker compose up -d` returns, and thereafter
+  # nothing on the host knows the stack is supposed to be running: a container that
+  # dies is restarted by its own `restart:` policy, but the SYSTEM has no state, no
+  # ordering, and no single command an operator can use. The unit is what gives it
+  # those — and it is what `systemctl` in the operational demonstration is asking.
+  ansible.builtin.template:
+    src: assignment-portal.service.j2
+    dest: /etc/systemd/system/{{ app_systemd_unit }}.service
+    owner: root
+    group: root
+    # 0644: a unit file holds no secret and `systemctl` reads it as root.
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart application stack
+
+- name: Flush handlers so configuration changes take effect before health is asserted
+  # `meta: flush_handlers` runs every handler notified so far, now, rather than at
+  # the end of the play. This is the point at which it is safe to restart the stack:
+  # the unit file exists, the image is pulled, the volumes are present, and `.env`
+  # and the composition are on disk. Flushing here rather than at the end of the
+  # play is what makes "a configuration change requires a service restart" true
+  # BEFORE the health check that is supposed to observe the result.
+  #
+  # On a converged host nothing is notified, so this is a no-op — which is the
+  # second half of the idempotency demonstration.
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure the application stack is running
+  # `state: started` is desired-state: the unit is brought up if it is down and
+  # left alone if it is already running. This covers a host that was rebooted or had
+  # the service stopped by hand, without restarting a stack that is already up.
+  #
+  # There is deliberately NO `daemon_reload` here. The unit file is reloaded by the
+  # `Reload systemd` handler, which fires only when the file actually changed; a
+  # reload on this always-run task would call `systemctl daemon-reload` on every
+  # converged run, which is both pointless and — because the module can report a
+  # daemon-reload as a change — enough to break the `changed=0` demonstration.
+  #
+  # This does not wait for health. Waiting is the next task's job and is done
+  # against the application's own endpoint, so that "the service started" and "the
+  # service works" stay two different claims — the distinction the CD pipeline also
+  # makes (docs/operations/docker-cd.md §3).
+  ansible.builtin.systemd:
+    name: "{{ app_systemd_unit }}"
+    state: started
+
+# ---------------------------------------------------------------------------
+# Verify
+# ---------------------------------------------------------------------------
+
+- name: Wait for the application to report healthy
+  # Polls the SAME endpoint the container's own healthcheck and the CD pipeline's
+  # health gate use, so "healthy" has one meaning across all three. `failed_when:
+  # false` keeps a not-yet-listening port from ending the retry loop early; the
+  # assert below is what turns "never became healthy" into a failed run.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ app_host_port }}/actuator/health"
+    return_content: true
+    status_code: 200
+  register: app_health
+  until: >-
+    app_health.status | default(0) == 200 and
+    (app_health.content | default('{}') | from_json).status | default('') == 'UP'
+  retries: "{{ app_health_retries }}"
+  delay: "{{ app_health_delay }}"
+  changed_when: false
+  failed_when: false
+
+- name: Assert the application became healthy
+  ansible.builtin.assert:
+    that:
+      - app_health.status | default(0) == 200
+      - (app_health.content | default('{}') | from_json).status | default('') == 'UP'
+    fail_msg: >-
+      The application did not report healthy after {{ app_health_retries }} attempts.
+      Inspect it with: systemctl status {{ app_systemd_unit }} and
+      journalctl -u {{ app_systemd_unit }} -n 100.
+    success_msg: "The application reports UP."
+
+- name: Verify the running application reports the expected release version
+  # The same claim the post-deployment smoke test makes (scripts/ops/smoke-test.ps1),
+  # made here for the same reason: a healthy application is not necessarily the
+  # RELEASE that was asked for. The version is baked into the image at build time
+  # (Dockerfile), so this cannot be satisfied by a stale container plus the right
+  # environment variable — it is the artefact identifying itself.
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ app_host_port }}/actuator/info"
+    return_content: true
+    status_code: 200
+  register: app_info
+  changed_when: false
+  failed_when: >-
+    (app_info.content | default('{}') | from_json).app.version | default('unknown')
+    != app_image_tag

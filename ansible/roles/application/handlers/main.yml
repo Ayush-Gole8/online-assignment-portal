@@ -1,0 +1,29 @@
+---
+# Handlers are flushed by the application role at a specific point — after the unit
+# file is written and before health is asserted — not at the end of the play. See
+# the `meta: flush_handlers` task in tasks/main.yml. The ordering matters: a
+# restart must happen once the configuration is on disk, and it must have finished
+# before anything claims the deployment is healthy.
+#
+# Handlers are also de-duplicated: a run that changes both the composition and
+# `.env` notifies "Restart application stack" twice and restarts ONCE.
+
+- name: Reload systemd
+  # Notified when the unit file changes. Without this, systemd keeps the unit
+  # definition it read at the last reload and a change to the file has no effect —
+  # the restart below would restart the OLD unit.
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart application stack
+  # Notified by a composition or `.env` change, and by a unit-file change.
+  #
+  # `state: restarted` is what makes a configuration change take effect: the stack
+  # is torn down and brought back up, so the containers read the new environment.
+  # On a converged host nothing is notified and this never runs — which is the
+  # half of the "run it twice" demonstration that says the FIRST run's changes are
+  # not repeated.
+  ansible.builtin.systemd:
+    name: "{{ app_systemd_unit }}"
+    state: restarted
+    daemon_reload: true

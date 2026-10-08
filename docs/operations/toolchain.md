@@ -71,7 +71,8 @@ Until a row is filled in, treat it as **unverified** and do not claim the prereq
 | --- | --- | --- | --- | --- | --- |
 | Jenkins | 2.4xx LTS or later | Jenkins UI → *About Jenkins* | `TBD` — **unverified** | — | Recorded from the controller, not a local install. Plugins required by the release stages: **Credentials Binding** and **SSH Agent**, in addition to those listed above |
 | OpenSSH client (`ssh`, `scp`) | Any version with `BatchMode` | `ssh -V` | `TBD` — **unverified** | — | Used by the deploy script to reach the host. The **host key must be in the agent's `known_hosts`**: verification is not disabled and must not be ([`docker-cd.md` §4](docker-cd.md)) |
-| Ansible | 2.16+ | `ansible --version` | `TBD` — **unverified** | — | Control node; the managed host needs only SSH and Python. **Not yet used by anything** — the release process places two files with `scp` and runs one script with `ssh`, which is not provisioning ([`docker-cd.md` §9](docker-cd.md)) |
+| Ansible | 2.16+ | `ansible --version` | `TBD` — **unverified** | — | Control node. The managed host needs only SSH, Python 3, and sudo. **Now used:** [`ansible/`](../../ansible) provisions the deployment host ([`ansible.md`](ansible.md)). It has not been run — neither a first provisioning nor the second converge run — so this row stays *unverified*. The `community.docker` collection is required (`ansible/requirements.yml`) |
+| Ansible Vault | Ships with `ansible-core` | `ansible-vault --version` | `TBD` — **unverified** | — | Encrypts [`ansible/group_vars/vault.yml`](../../ansible/group_vars/vault.yml). The file is currently plaintext placeholders and **must be encrypted before it holds a real value** |
 | Git | 2.40+ | `git --version` | `TBD` — **unverified** | — | Must be able to read tags: the **Release Version** stage runs `git describe --tags --exact-match HEAD` |
 
 ## 6. Testing and quality

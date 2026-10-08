@@ -1,0 +1,99 @@
+---
+# ===========================================================================
+# Defaults for the portal's deployment on a host.
+#
+# Every value here can be overridden in group_vars or host_vars; the ones that
+# matter for provisioning (paths, the image, the port) are set explicitly in
+# group_vars/staging.yml so a reader sees them there rather than discovering them
+# by reading this file.
+# ===========================================================================
+
+# The directory holding compose.prod.yaml, .env, and the systemd unit's working
+# files. Matches DEPLOY_PATH in scripts/ops/env.cmd.
+deploy_path: /opt/assignment-portal
+
+# The account that owns the deployment directory. Not the container's user — that
+# is the image's own uid 1001 — and not the owner of the uploaded files, which live
+# in a Docker named volume.
+app_user: portal
+app_group: portal
+
+# ---------------------------------------------------------------------------
+# Image
+# ---------------------------------------------------------------------------
+
+image_registry: docker.io
+image_repository: CHANGE_ME/assignment-portal
+
+# The version this play converges the host to. Never `latest` (ADR-006).
+app_image_tag: "1.0.0"
+
+# Whether to re-pull the image even when a local copy of the tag already exists.
+#
+# FALSE is the default, and it is what makes a second run converge: with it true,
+# every run would re-pull and report a change even when the host already holds the
+# image the tag names, which makes the idempotency demonstration impossible to
+# show. Set it true (or `-e app_image_pull_force=true`) only when the host must
+# converge to a tag that has been re-pointed upstream — the one case where "the
+# image is present" and "the image is current" are different claims.
+app_image_pull_force: false
+
+# ---------------------------------------------------------------------------
+# Published address
+# ---------------------------------------------------------------------------
+
+app_bind_address: "0.0.0.0"
+app_host_port: 8080
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+#
+# Named exactly as deploy/compose.prod.yaml names them. This is load-bearing: a
+# differently-named volume here would be adopted-adjacent rather than adopted, and
+# Compose would create its own — two databases, one of them empty, and a
+# deployment that has silently lost every submission.
+app_volumes:
+  - assignment-portal-mysql-data
+  - assignment-portal-uploads
+
+# ---------------------------------------------------------------------------
+# Host directories
+# ---------------------------------------------------------------------------
+#
+# On the host's own filesystem, deliberately outside Docker's storage root, so a
+# `docker system prune -a --volumes` cannot take them with it.
+app_host_directories:
+  - path: "{{ deploy_path }}/backups"
+    # Not world-readable: a database dump is a copy of every submission record.
+    mode: "0750"
+  - path: "{{ deploy_path }}/releases"
+    # Rotating copies of the composition and its environment, so a bad release has
+    # something to be compared against.
+    mode: "0750"
+
+# ---------------------------------------------------------------------------
+# The service unit
+# ---------------------------------------------------------------------------
+
+app_systemd_unit: assignment-portal
+
+# The Compose file name inside the deployment directory. Read by the unit template
+# and by nothing else; the CD pipeline hard-codes the same name.
+app_compose_file: compose.prod.yaml
+
+# Grace period systemd waits for the unit to stop before SIGKILL. Has to be longer
+# than the application's own graceful shutdown drain (server.shutdown: graceful),
+# or systemd kills the JVM mid-request.
+app_stop_timeout: 90
+
+# ---------------------------------------------------------------------------
+# Health verification
+# ---------------------------------------------------------------------------
+
+# How long to wait for /actuator/health to report UP. The budget covers Flyway
+# migrating the schema and the Spring context starting on a cold host; the
+# container's own healthcheck and `depends_on: service_healthy` mean MySQL is
+# already accepting connections before the application is asked to start.
+app_health_retries: 30
+app_health_delay: 6

@@ -1,0 +1,34 @@
+---
+# Base packages every later role assumes are present. Modest on purpose: a
+# provisioning role that installs a large set of tools is a role whose failures
+# are hard to attribute.
+common_packages:
+  # apt needs these to verify the signed package repositories the docker role adds
+  # (the Docker GPG key is dearmoured into a keyring, and https transport is used
+  # to fetch it).
+  - ca-certificates
+  - curl
+  - gnupg
+  # Ansible's connection plugin and the modules in this playbook are written in
+  # Python; a minimal cloud image can lack these.
+  - python3
+  - python3-apt
+  # Lets Ansible read and set file ACLs as the unprivileged connection user before
+  # escalating. Its absence is not fatal, but the failure it produces ("Failed to
+  # set permissions … setfacl not found") is confusing and avoidable.
+  - acl
+
+# The time-sync daemon, and the service that runs it. The package is a separate
+# variable from the service name because the two differ on some distributions, and
+# a host already running `systemd-timesyncd` overrides BOTH in host_vars rather
+# than installing a second daemon beside the one it has:
+#
+#   # host_vars/<host>.yml
+#   common_timesync_service: systemd-timesyncd
+#   common_timesync_package: systemd-timesyncd
+#
+# The package is installed by the role rather than assumed present — a host that
+# does not ship it would otherwise fail at the `systemd` task below with "Could not
+# find the requested service".
+common_timesync_service: chrony
+common_timesync_package: chrony

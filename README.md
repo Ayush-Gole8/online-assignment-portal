@@ -29,15 +29,17 @@ The application is deliberately modest. The engineering objective of this reposi
 > green build is still Milestone 2's.**
 >
 > **Not yet present — deliberately:** the audit trail (FR-24), any form of resubmission, and an
-> admin UI beyond the role gate. Both halves of the pipeline are now written: continuous
+> admin UI beyond the role gate. The delivery path is now written end to end: continuous
 > integration — a [`Jenkinsfile`](Jenkinsfile), the unit/integration/browser suites, and a
-> [`Dockerfile`](Dockerfile) that packages the JAR into a production image — and, added
-> 2026-10-07, the release process — a `vX.Y.Z` git tag is the version, the image is published to
-> Docker Hub under it ([`deploy/`](deploy), [`scripts/ops/`](scripts/ops),
-> [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)), and a host runs that exact
-> version or the previous one is restored. **Nothing in either half has run to green: the image
-> has never been built, no image has been pushed, no host has been contacted, and no rollback has
-> fired.** What is still genuinely absent is provisioning: no Ansible, no TLS, no backup story.
+> [`Dockerfile`](Dockerfile) that packages the JAR into a production image; release — a `vX.Y.Z`
+> git tag is the version, the image is published to Docker Hub under it
+> ([`deploy/`](deploy), [`scripts/ops/`](scripts/ops),
+> [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)); and provisioning — an
+> [`ansible/`](ansible) tree that takes a bare host to one running the stack as a managed systemd
+> service ([`docs/operations/ansible.md`](docs/operations/ansible.md)). **Nothing in any of it has
+> run to green: the image has never been built, no image has been pushed, no host has been
+> contacted, no rollback has fired, and no playbook has been executed.** What is still genuinely
+> absent is TLS, a firewall, and a backup/restore story for the volumes.
 >
 > See [Unverified claims](#unverified-claims) before relying on any statement below.
 >
@@ -190,6 +192,10 @@ contract, and a claim-by-claim list of what has not been run are in `docker-cd.m
 ├── deploy/                       # The deployment half: compose.prod.yaml (pulls a
 │                                 #   published version, never builds), the host .env
 │                                 #   template, and the host-side release script
+├── ansible/                      # Provisioning: three roles (common, docker,
+│                                 #   application) take a bare host to one running the
+│                                 #   stack as assignment-portal.service; secrets are
+│                                 #   ansible-vault encrypted
 ├── .dockerignore                 # admits one file into the build context: the JAR
 ├── mvnw / mvnw.cmd               # Maven Wrapper — the canonical build mechanism
 │                                 #   pins Maven 3.9.16; no local Maven needed
@@ -243,6 +249,7 @@ contract, and a claim-by-claim list of what has not been run are in `docker-cd.m
 | [`docs/operations/toolchain.md`](docs/operations/toolchain.md) | Required tool versions |
 | [`docs/operations/docker.md`](docs/operations/docker.md) | The production image, the Compose stack, and the container lifecycle |
 | [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md) | The release process: what each ref does, publishing to Docker Hub, deploying and rolling back |
+| [`docs/operations/ansible.md`](docs/operations/ansible.md) | Provisioning a Linux host: the inventory, the roles, the variables, the vault, idempotency, and the systemd service |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to propose a change |
 | [`SECURITY.md`](SECURITY.md) | How uploads, secrets, and vulnerabilities are handled |
 
@@ -306,13 +313,15 @@ than an in-memory substitute, so the migration is exercised on the engine that s
 student can submit and read a decision, and a reviewer can decide. The continuous-integration half
 of the pipeline exists — [`Jenkinsfile`](Jenkinsfile) runs the build, the unit, integration and
 Selenium suites, a started test environment, and the quality gate that refuses to build an image
-from a failed revision. The image itself is now defined: a multi-stage
-[`Dockerfile`](Dockerfile) that packages the JAR Maven built, and a
-[`compose.yaml`](compose.yaml) that runs it beside MySQL with a volume each. What is still absent is
-the delivery half: no registry publication, no Ansible playbooks, and no rollback path.
+from a failed revision. The image is defined: a multi-stage [`Dockerfile`](Dockerfile) that packages
+the JAR Maven built. The delivery half is now written too — the release process (`deploy/`,
+`scripts/ops/`, [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)) and provisioning
+([`ansible/`](ansible), [`docs/operations/ansible.md`](docs/operations/ansible.md)). What is still
+absent is TLS, a firewall, and a backup/restore story for the volumes.
 
 The image is **written, not built** — `Dockerfile` and `compose.yaml` were added in a sandbox with no
-route to a registry, so no `docker build` has run. See
+route to a registry, so no `docker build` has run. The same is true of every delivery and
+provisioning artefact: no push, no deploy, no rollback, no playbook run. See
 [`docs/operations/docker.md` §8](docs/operations/docker.md) for the list of unverified claims and
 the commands that would close them.
 
@@ -411,6 +420,9 @@ neither set has been run at all:
 | A release is deployed to a host and verified by a smoke test | **Not run** — no host has been contacted |
 | A failed deployment rolls back to the previous version | **Not run** — the rollback has never fired. [docker-cd.md §7](docs/operations/docker-cd.md) |
 | The release gate keeps a feature branch out of the registry and off a host | **Not run** — the equivalent gate on the image build is observed to skip in [defect-demonstration.md](docs/evidence/defect-demonstration.md); the two new gates have not been exercised |
+| `ansible-playbook` installs Docker and runs the stack as `assignment-portal.service` | **Not run** — nothing in [ansible/](ansible) has been executed. [ansible.md §9](docs/operations/ansible.md) |
+| The second Ansible run converges with `changed=0` | **Not run** — this is the demonstration the playbook exists to make |
+| `systemctl status` / `systemctl restart assignment-portal` behave as documented | **Not run** |
 
 Design intent is recorded and reviewable; behaviour counts as evidence only where a run is named
 above. [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine)

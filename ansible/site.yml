@@ -1,0 +1,41 @@
+---
+# Provision a Linux deployment host for the Online Assignment Portal and bring the
+# application up as a host-managed service.
+#
+# One play, three roles, in dependency order:
+#
+#   common       generic host prerequisites — base packages, time sync
+#   docker       Docker Engine, the Compose plugin, the daemon config the project needs
+#   application  the deploy directory, the compose file, the environment, the
+#                persistent volumes, the image, a systemd unit, and a health check
+#
+# Role-based rather than one long playbook so each concern is read, changed, and
+# reasoned about on its own, and so the docker role could serve a second
+# application on the same host without carrying this one's assumptions
+# (docs/operations/ansible.md §3).
+#
+# Run, and then run again — the second run converges with no changes:
+#
+#   ansible-playbook -i ansible/inventory/staging.ini ansible/site.yml --ask-vault-pass
+#
+# Preview without touching the host:
+#
+#   ansible-playbook -i ansible/inventory/staging.ini ansible/site.yml --check --diff --ask-vault-pass
+- name: Provision and deploy the Online Assignment Portal
+  hosts: staging
+  become: true
+
+  # group_vars/staging.yml is auto-loaded for the `staging` group. vault.yml is NOT
+  # auto-loaded — a flat group_vars file not named after a group (or `all`) is
+  # ignored by the group_vars mechanism — so it is referenced explicitly here. It
+  # holds the vault-encrypted secrets that group_vars/staging.yml maps as vault_*.
+  vars_files:
+    - group_vars/vault.yml
+
+  roles:
+    - role: common
+      tags: [common]
+    - role: docker
+      tags: [docker]
+    - role: application
+      tags: [application]

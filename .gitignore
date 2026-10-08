@@ -76,3 +76,16 @@ test-output/
 # ---------------------------------------------------------------------------
 *.retry
 .jenkins/
+
+# Ansible Vault password sources — NEVER commit these.
+#
+# The vault itself (ansible/group_vars/vault.yml) is NOT ignored: once encrypted
+# it is ciphertext and belongs in the repository, and ignoring it would also hide
+# the one file a reviewer must be able to see is encrypted
+# (docs/operations/ansible.md §6). What must never be committed is the
+# passphrase, in whatever form it is supplied.
+.vault_pass
+.vault_pass.txt
+vault-password
+vault-password.txt
+*.vault-password
