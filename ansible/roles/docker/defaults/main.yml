@@ -1,0 +1,70 @@
+---
+# ---------------------------------------------------------------------------
+# Packages
+# ---------------------------------------------------------------------------
+
+docker_packages:
+  # The engine itself, from Docker's own repository.
+  - docker-ce
+  - docker-ce-cli
+  # The Compose **v2** plugin. This is the package that provides `docker compose`;
+  # the legacy `docker-compose` script is a different thing and is NOT installed.
+  # The deployment depends on `docker compose up --wait`, which v1 does not have.
+  - docker-compose-plugin
+  # containerd is pulled in as a dependency of docker-ce, but is listed so that a
+  # dependency change upstream does not silently remove it.
+  - containerd.io
+  # The Docker SDK for Python. The application role's docker_volume, docker_image
+  # and docker_login modules run ON THE TARGET and import `docker`; without this
+  # they fail with "Failed to import the required Python library (Docker SDK for
+  # Python)". It is installed here rather than in `common` because it exists only
+  # because this role talks to the daemon.
+  - python3-docker
+
+# ---------------------------------------------------------------------------
+# Repository
+# ---------------------------------------------------------------------------
+
+docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+docker_apt_keyring_path: /etc/apt/keyrings/docker.asc
+docker_apt_repository_url: https://download.docker.com/linux/ubuntu
+
+# Docker publishes per-architecture. Ansible reports the kernel's name for the
+# architecture — `x86_64`, `aarch64` — while Debian's apt uses `amd64`, `arm64`.
+# This map is what translates between them, so the repository line writes the
+# architecture apt expects. Keyed on ansible_architecture with `arm64` as the
+# fallback for an unlisted value on an ARM host.
+docker_apt_architecture: >-
+  {{
+    {
+      'x86_64': 'amd64',
+      'amd64': 'amd64',
+      'aarch64': 'arm64',
+      'armv7l': 'armhf'
+    }.get(ansible_architecture, 'arm64')
+  }}
+
+# ---------------------------------------------------------------------------
+# Daemon configuration — deployed to /etc/docker/daemon.json
+# ---------------------------------------------------------------------------
+#
+# Only settings this project has a reason for. A daemon.json that mirrors every
+# Docker default is a file nobody can read and nobody dares change.
+docker_daemon_config:
+  # Rotate container logs. The database and the application both log to stdout, and
+  # Docker's default is an UNBOUNDED json-file per container — a host left running
+  # long enough fills its disk with logs and takes the deployment down with it.
+  # This bounds each file at 10 MB and keeps three, so a container can never hold
+  # more than 30 MB of logs.
+  log-driver: json-file
+  log-opts:
+    max-size: "10m"
+    max-file: "3"
+
+  # Keep containers running while the daemon is restarted. The daemon is restarted
+  # whenever this role's handler fires — a daemon.json change — and without this,
+  # that restart would stop the database and the application and then not bring
+  # them back, because the restart policy is applied by the daemon that just went
+  # away. With it, the running deployment survives a daemon restart, which is what
+  # makes a configuration change to Docker a non-event for users.
+  live-restore: true

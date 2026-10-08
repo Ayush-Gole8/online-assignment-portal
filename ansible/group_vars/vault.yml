@@ -1,0 +1,65 @@
+---
+# ===========================================================================
+# SECRETS — must be encrypted before this file holds anything real.
+#
+# The values below are PLACEHOLDERS, present only so the playbook resolves its
+# variables and so this file documents which secrets exist. They are not
+# credentials and nothing deploys with them.
+#
+# Before this host is provisioned for real:
+#
+#   1. Replace every `CHANGE_ME` below with the real value.
+#   2. Encrypt the file — after this step it is unreadable without the passphrase
+#      and safe to commit:
+#
+#        ansible-vault encrypt ansible/group_vars/vault.yml
+#
+#   3. Provide the passphrase at run time, never from a file in the repository:
+#
+#        ansible-playbook -i ansible/inventory/staging.ini ansible/site.yml \
+#            --ask-vault-pass
+#      or point --vault-password-file at a path OUTSIDE this repository.
+#
+# Editing an encrypted file:
+#
+#   ansible-vault edit ansible/group_vars/vault.yml
+#
+# CLAUDE.md §7 rule 1: no password, token, or key is ever written in a file in
+# this repository — Ansible variables explicitly included. If this file is staged
+# with plaintext in it, the mistake is the commit, not the encryption step that
+# was skipped. Check with `git diff --cached -- ansible/group_vars/vault.yml`
+# BEFORE committing: anything starting `$ANSIBLE_VAULT;` is encrypted, anything
+# readable is not.
+#
+# These are mapped to their plain names in group_vars/staging.yml, so the rest of
+# the roles reference `db_password` and never a `vault_`-prefixed name directly.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Database — created on the MySQL container's first start, and read by the
+# application to connect. The two cannot be allowed to differ: both come from
+# here, through the same `.env`.
+# ---------------------------------------------------------------------------
+
+# Password for the application database user (db_username in group_vars/staging.yml).
+vault_db_password: CHANGE_ME
+
+# Password for the MySQL `root` account. Used only by the container's first-start
+# initialisation and its healthcheck; the application never connects as root.
+vault_db_root_password: CHANGE_ME_ROOT
+
+# ---------------------------------------------------------------------------
+# Docker registry — optional
+# ---------------------------------------------------------------------------
+#
+# Needed only when the application image is pulled from a PRIVATE Docker Hub
+# repository. Docker Hub rate-limits anonymous pulls, so a host that pulls often
+# may set these even for a public repository.
+#
+# Left empty, the application role skips `docker login` entirely and pulls
+# anonymously. Set the username to any non-empty value to enable the login.
+#
+# Use an ACCESS TOKEN, not the account password: revocable on its own, scoped to
+# read access, and rotatable without changing the account's sign-in.
+vault_registry_username: ""
+vault_registry_password: ""

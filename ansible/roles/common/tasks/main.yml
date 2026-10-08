@@ -1,0 +1,41 @@
+---
+# ===========================================================================
+# Generic host prerequisites.
+#
+# "Generic" is the constraint on this role: nothing here knows that the Online
+# Assignment Portal exists. It prepares a Debian/Ubuntu host to be provisioned by
+# the roles that follow, and it would do the same for any other application. The
+# moment a task in this role mentions the portal, it belongs in `application`.
+#
+# The Docker-adjacent tools a Python caller needs — the Docker SDK, `python3-docker`
+# — are NOT here: they exist only because the docker role talks to the daemon, so
+# they are installed there, where that reason is visible.
+# ===========================================================================
+
+- name: Update the apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+  # Refreshing the cache is not a change to the host's desired state, so it must
+  # not be reported as one — otherwise every run is "changed" and the converge
+  # demonstration means nothing. `cache_valid_time` above means apt is not even
+  # consulted twice within the hour.
+  changed_when: false
+
+- name: Install base packages and the time-sync daemon
+  # The time-sync package is installed here rather than assumed present: the
+  # `systemd` task below enables a unit, and enabling a unit whose package is
+  # absent fails with "Could not find the requested service" — a failure that
+  # reads like a systemd problem and is really a missing package.
+  ansible.builtin.apt:
+    name: "{{ common_packages + [common_timesync_package] }}"
+    state: present
+
+- name: Ensure the time-sync service is enabled and running
+  # A host whose clock has drifted cannot verify TLS certificates or reason about
+  # the timestamps in the database. This is the one always-on service this role
+  # manages; everything else is a prerequisite the other roles install and use.
+  ansible.builtin.systemd:
+    name: "{{ common_timesync_service }}"
+    state: started
+    enabled: true

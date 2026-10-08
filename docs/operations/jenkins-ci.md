@@ -299,7 +299,7 @@ wrong place, which is the failure that is hardest to notice.
 | **Skip a stage silently on a release** | A release with no `IMAGE_REPOSITORY`, or with a `DEPLOY_ENV` and no `DEPLOY_HOST`, **fails** rather than being skipped. A green build that published nothing and deployed nothing is the one result a release must never report. |
 | **Roll back on a red build that never reached the host** | There is nothing to undo, and the report says so rather than claiming to have rolled back. See [`docker-cd.md` §7](docker-cd.md). |
 | **A coverage gate, notifications** | Not requested at this stage; adding them now would be a threshold with nothing behind it. A failed deployment is a red build and an archived report — nobody is paged. |
-| **Ansible** | [CLAUDE.md §13](../../CLAUDE.md) lists Ansible provisioning as remaining Milestone 5 work. What exists is `scp` and `ssh` from the agent, which provisions nothing: it places two files and runs one script ([`docker-cd.md` §9](docker-cd.md)). |
+| **Provisioning a host** | The `Deploy` stage places the composition and the host-side script with `scp` and runs one script over `ssh`; that is a deployment, not provisioning. Turning a bare host into one that can receive a release is the [`ansible/`](../../ansible) playbook, run by hand before any release is deployed ([`ansible.md`](ansible.md)). No Jenkins stage invokes it, and none should: provisioning is a prerequisite of the pipeline, not a stage inside it. |
 
 ## 10. Known gaps
 

@@ -1,0 +1,85 @@
+# ===========================================================================
+# systemd unit for the Online Assignment Portal Compose stack.
+#
+# Installed to /etc/systemd/system/{{ app_systemd_unit }}.service by
+# roles/application/tasks/main.yml.
+#
+# WHY A UNIT AT ALL
+#   `docker compose up -d` starts containers and returns. After that, nothing on
+#   the host knows the stack is SUPPOSED to be running. Each container restarts
+#   itself on failure — that is the compose `restart:` policy — but the system as a
+#   whole has no state an operator can query and no single command to act on it.
+#   This unit gives it both:
+#
+#       systemctl status  {{ app_systemd_unit }}
+#       systemctl restart {{ app_systemd_unit }}
+#       systemctl stop    {{ app_systemd_unit }}
+#
+#   Those are the operational verbs, and they are what the demonstration in
+#   docs/operations/ansible.md §8 exercises.
+#
+# WHY Type=oneshot WITH RemainAfterExit=yes
+#   `docker compose up -d` is a COMMAND that runs and exits, not a daemon that
+#   stays in the foreground — so the unit is `oneshot`, not `simple`. Without
+#   `RemainAfterExit=yes` systemd would record the unit as inactive the moment the
+#   command returned and would not track it at all; with it, the unit reports
+#   `active (exited)` for as long as the stack is up, which is the state
+#   `systemctl status` must show.
+#
+# WHY dependencies are ordered, not just required
+#   The stack needs the Docker daemon to be up before `compose` will work, and it
+#   needs the network to pull the image on a cold start. `Requires` states the
+#   dependency; `After` states the order. Both are needed — `Requires` alone would
+#   start the daemon and this unit at the same time and race.
+# ===========================================================================
+
+[Unit]
+Description=Online Assignment Portal (Docker Compose)
+Documentation=file:{{ deploy_path }}/{{ app_compose_file }}
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+WorkingDirectory={{ deploy_path }}
+
+# `--wait` makes `up` block until every service with a healthcheck reports healthy,
+# so `systemctl start` returning is a meaningful claim: the database is accepting
+# connections and the application answers its own health endpoint. Without it, the
+# unit would be "active" while the application was still running Flyway.
+#
+# The image is pulled before this runs (the application role), and compose.prod.yaml
+# declares no `build:`, so `up` can only ever start the image the release published.
+ExecStart=/usr/bin/docker compose -f {{ app_compose_file }} up -d --remove-orphans --wait
+
+# `down` stops and removes this project's containers and its network, and KEEPS the
+# named volumes — the database and the uploaded files survive a stop/start cycle
+# (ADR-004). `--remove-orphans` also clears a container left behind by a service
+# that a later release removed from the composition.
+ExecStop=/usr/bin/docker compose -f {{ app_compose_file }} down --remove-orphans
+
+# `systemctl reload` shows current container state without restarting anything.
+ExecReload=/usr/bin/docker compose -f {{ app_compose_file }} ps
+
+# Long enough for a cold start: MySQL's first-run initialisation, Flyway migrating
+# the schema, and the application coming up. Must exceed the health wait the role
+# performs (app_health_retries × app_health_delay), or systemd kills a start the
+# role is still politely waiting on.
+TimeoutStartSec=600
+
+# Longer than the application's own graceful-shutdown drain (server.shutdown:
+# graceful), so systemd does not SIGKILL the JVM while it is still finishing
+# in-flight requests.
+TimeoutStopSec={{ app_stop_timeout }}
+
+# systemd does not restart this unit; the containers do. Each service carries
+# `restart: unless-stopped`, which is the right place for that decision: a crashed
+# database should be restarted by the thing that knows it crashed, and a restart
+# loop should not be hidden inside a oneshot unit that already exited successfully.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

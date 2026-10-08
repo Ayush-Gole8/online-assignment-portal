@@ -373,10 +373,13 @@ What this process does not do, stated rather than left to be discovered:
 - **No TLS termination.** `SESSION_COOKIE_SECURE` is `false` unless a host sets it, which is
   correct for plain HTTP and wrong for anything reachable from the internet. A deployment that
   sets it must terminate TLS in front of the application; nothing here does.
-- **No Ansible.** [`toolchain.md`](toolchain.md) §5 lists Ansible as the provisioning tool, and
-  CLAUDE.md §13 lists Ansible provisioning as remaining Milestone 5 work. What exists is `scp`
-  and `ssh` from the agent, which provisions nothing — it places two files and runs one script.
-  Host provisioning, package installation, and the firewall are a human's job here.
+- **No Ansible — no provisioning in the pipeline itself.** This pipeline places its own files and
+  runs one script; it provisions nothing. Host provisioning is a separate playbook —
+  [`ansible.md`](ansible.md) — run by hand before a host is deployed to. The two share the
+  `/opt/assignment-portal` contract and the same `compose.prod.yaml` file, and the playbook's
+  `application` role can bring up the same stack as `assignment-portal.service` when a host is
+  provisioned that way. Neither is wired to the other: the `Deploy` stage still uses
+  `deploy-on-host.sh` over `ssh`, and `ansible/site.yml` is not invoked by any stage.
 - **No image digest recorded.** The deployment names a tag, not a digest. A tag can be re-pointed
   upstream; `docker push` prints the manifest digest and it is left in the console for this
   reason, but nothing pins a deployment to it. Recording it is the obvious next step and is not

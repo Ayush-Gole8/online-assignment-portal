@@ -425,6 +425,18 @@ it — which is also the first milestone whose tests exercise a state transition
   tag is the version), `docker-login.cmd` (token over stdin, never an argument), `publish-image.cmd`
   (refuses `latest`), `deploy-release.cmd` (the deployment and its rollback), `smoke-test.ps1` /
   `smoke-test.cmd`.
+- `ansible/` — the **provisioning** half, written on 2026-10-08 and unrun. `site.yml` and three
+  roles: `common` (generic host prerequisites — base packages, time sync — and nothing that knows
+  the portal exists), `docker` (Docker Engine, the Compose v2 plugin, the Python SDK, and the two
+  `daemon.json` settings this project needs: bounded container logs and `live-restore`), and
+  `application` (the deploy directory, the composition, `.env`, the named volumes, the image, a
+  **systemd unit** so the stack is managed as `assignment-portal.service`, and a health and version
+  check). Secrets are `ansible/group_vars/vault.yml`, to be encrypted with `ansible-vault`; the flat
+  `group_vars/vault.yml` is not auto-loaded and is referenced explicitly from `site.yml`. It shares
+  the `/opt/assignment-portal` contract, and the `compose.prod.yaml` file itself, with the CD
+  pipeline — which is why the role copies that file rather than templating a second composition
+  ([`docs/operations/ansible.md` §4](docs/operations/ansible.md)). **No `ansible-playbook` has been
+  run**, and `ansible.md` §9 lists what that leaves unproven.
 - `src/main/resources/application.yml` — externalised configuration, no secrets.
 
 **`auth/` — identity (Milestone 2).** `User` entity and repository, `UserService`, and a
@@ -481,17 +493,17 @@ exercises each constraint by inserting rows the service would never produce.
   different concern from *security* events.
 - **No resubmission.** A rejection is terminal in the MVP. Rejected work is not resubmitted, and
   nothing resets a submission to `SUBMITTED`.
-- **No Ansible, no host provisioning, and no deployment that has ever run.** The *delivery* half of
-  the pipeline is now written — a versioned image published to Docker Hub, `ssh`/`scp` to a host,
+- **No TLS, no firewall, no backup story, and no deployment that has ever run.** The *delivery* half
+  of the pipeline is written — a versioned image published to Docker Hub, `ssh`/`scp` to a host,
   `docker compose pull` + `up --no-build --wait`, a health check from the agent, a smoke test that
-  asserts the running version, and a rollback to the previous version. What is still absent is
-  **provisioning**: no playbooks, no package installation, no firewall, no TLS. The host-side
-  sequence places two files and runs one script (recorded in
-  [`docs/operations/docker-cd.md` §9](docs/operations/docker-cd.md)). Every one of the new
-  mechanisms is **written, not run**, and CLAUDE.md §13's precondition for the delivery work — a
-  green `clean verify` — is still unmet, so nothing here has been exercised. The image is
-  **written, not built**; `docs/operations/docker.md` §8 and `docker-cd.md` §8 list what has not
-  been run.
+  asserts the running version, a rollback to the previous version — and, added 2026-10-08, the
+  *provisioning* half: the `ansible/` tree turns a bare host into one running the stack as a managed
+  systemd service. What is still absent is everything around that: no TLS terminator (so
+  `SESSION_COOKIE_SECURE` is `false`), no firewall rule deciding who can reach the application port,
+  and no backup or restore for either volume. Every one of these mechanisms is **written, not run**,
+  and CLAUDE.md §13's precondition for the delivery work — a green `clean verify` — is still unmet,
+  so nothing here has been exercised. The image is **written, not built**;
+  `docs/operations/docker.md` §8, `docker-cd.md` §8 and `ansible.md` §9 list what has not been run.
 - **No admin UI.** `ADMIN` exists as a role, gates `/admin/**`, and can review; no management
   screens ship.
 
@@ -575,25 +587,32 @@ tools they loaded, not the version of every tool listed in that document, so mos
 still marked *unverified* at this revision.
 
 **Milestone 5 — the delivery pipeline.** The application is now as complete as the MVP needs it to
-be. The pipeline now carries both halves: continuous integration — build, unit, integration and
-Selenium E2E stages, and a multi-stage `Dockerfile` that packages the Maven artefact into a
-production image — and, added 2026-10-07, the release process: a `vX.Y.Z` tag is the version, the
-image is published to Docker Hub under it, and a host runs that exact version or the previous one is
-restored. `deploy/`, `scripts/ops/` and [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)
-are the artefacts.
+be. The pipeline carries three quarters of the delivery path:
 
-What Milestone 5 still carries: **Ansible provisioning and host management** (no playbooks, no TLS,
-no backup story — [`docker-cd.md` §9](docs/operations/docker-cd.md)); and — if it is to be claimed
-— the FR-24 audit trail carried over above.
+- **continuous integration** — build, unit, integration and Selenium E2E stages, and a multi-stage
+  `Dockerfile` that packages the Maven artefact into a production image;
+- **release** (added 2026-10-07) — a `vX.Y.Z` tag is the version, the image is published to Docker
+  Hub under it, and a host runs that exact version or the previous one is restored. `deploy/`,
+  `scripts/ops/` and [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md) are the
+  artefacts;
+- **provisioning** (added 2026-10-08) — the `ansible/` tree: three roles that take a bare host to one
+  running the stack as `assignment-portal.service`, with the same `/opt/assignment-portal` contract
+  the release path uses, and a systemd unit that makes `systemctl status` and `systemctl restart` the
+  operational verbs ([`docs/operations/ansible.md`](docs/operations/ansible.md)).
+
+What Milestone 5 still carries: **TLS**, **a firewall**, and a **backup/restore story for the
+volumes** — the three things [`ansible.md` §10](docs/operations/ansible.md) names as gaps; and — if
+it is to be claimed — the FR-24 audit trail carried over above.
 
 **Nothing in Milestone 5 should be trusted before the Milestone 4 build is green**, and that
 precondition is still unmet. Every Milestone 5 artefact was added ahead of it on the repository
 owner's instruction, which is a deliberate divergence from the sequencing this section describes.
 The consequence is recorded rather than glossed: the image has never been built, the stack has never
-been started, no image has been pushed, no host has been contacted, no rollback has fired, and every
-claim about any of them is *written, not proven* ([`docs/operations/docker.md` §8](docs/operations/docker.md)
-and [`docker-cd.md` §8](docs/operations/docker-cd.md) list them one by one). Creating the
-`Dockerfile` also removed the guard that had made the `Docker Build` stage skip, so that stage now
-runs on every green build and fails it when the image does not build; the old empty `Deployment`
-stub has been replaced by a **`Deploy`** stage gated on a green build **and** a `vX.Y.Z` tag **and**
-a chosen `DEPLOY_ENV`.
+been started, no image has been pushed, no host has been contacted, no rollback has fired, no
+playbook has run, and every claim about any of them is *written, not proven*
+([`docs/operations/docker.md` §8](docs/operations/docker.md),
+[`docker-cd.md` §8](docs/operations/docker-cd.md) and
+[`ansible.md` §9](docs/operations/ansible.md) list them one by one). Creating the `Dockerfile` also
+removed the guard that had made the `Docker Build` stage skip, so that stage now runs on every green
+build and fails it when the image does not build; the old empty `Deployment` stub has been replaced
+by a **`Deploy`** stage gated on a green build **and** a `vX.Y.Z` tag **and** a chosen `DEPLOY_ENV`.

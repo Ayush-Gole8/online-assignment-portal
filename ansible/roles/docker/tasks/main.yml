@@ -1,0 +1,110 @@
+---
+# ===========================================================================
+# Docker Engine, the Compose plugin, and the daemon configuration this project
+# needs.
+#
+# Four things, and each waits in a different place because each is needed by a
+# different stage of the play:
+#
+#   1. Packages   — Docker itself, the Compose v2 plugin, and the Python SDK the
+#                   application role's docker_* modules import
+#   2. Repository — Docker's signed apt repository, which is where 1 comes from
+#   3. Service    — the daemon, enabled so the host comes back up after a reboot
+#   4. Config     — daemon.json, which REQUIRES A RESTART and therefore has a
+#                   handler rather than a bare restart
+#
+# Version pinning note: Docker's own `docker-ce` and the distribution's
+# `docker.io` are different packages that both provide the `docker` command. This
+# role installs Docker's, from Docker's repository, because that is the one that
+# ships the Compose **v2** plugin as `docker-compose-plugin` — and the deployment
+# depends on `docker compose up --wait`, which the legacy v1 binary does not have
+# (docs/operations/docker-cd.md §4).
+# ===========================================================================
+
+- name: Install apt prerequisites for adding a signed repository
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+
+- name: Ensure the apt keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Add Docker's apt signing key
+  # `get_url` rather than `apt_key`: the module is desired-state, verifies the
+  # download, and fails the run when the key cannot be fetched rather than
+  # silently continuing with an unsigned repository. `dearmor` converts the ASCII
+  # armoured key to the binary keyring format apt expects in /etc/apt/keyrings.
+  #
+  # The URL is https and the checksum is not pinned here — a rotating key file
+  # cannot carry a fixed checksum — so this is the one download in the play whose
+  # authenticity rests on TLS and on Docker's own key-distribution host. Recorded
+  # as a limitation in docs/operations/ansible.md §4.
+  ansible.builtin.get_url:
+    url: "{{ docker_apt_key_url }}"
+    dest: "{{ docker_apt_keyring_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: docker_apt_key
+
+- name: Add the Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ docker_apt_architecture }} signed-by={{ docker_apt_keyring_path }}]
+      {{ docker_apt_repository_url }} {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+  register: docker_apt_repository
+
+- name: Update the apt cache after the repository is added
+  ansible.builtin.apt:
+    update_cache: true
+  when: docker_apt_repository.changed
+  changed_when: false
+
+- name: Install Docker Engine, the Compose plugin, and the Docker SDK for Python
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+
+- name: Ensure the Docker service is enabled and running
+  # `enabled: true` is what makes the host come back up after a reboot — a
+  # deployment host that loses its containers on a restart is a deployment host
+  # that has to be provisioned by hand every time it reboots.
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Configure the Docker daemon
+  ansible.builtin.copy:
+    content: "{{ docker_daemon_config | to_nice_json }}\n"
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "python3 -c 'import json,sys; json.load(open(sys.argv[1]))' %s"
+  # `validate` is what makes this task safe to run against a live host: a
+  # malformed daemon.json is rejected before it is written, so the daemon cannot
+  # be left unable to start. Without it, a templating error would take Docker down
+  # on the next restart — and the restart is this task's own handler.
+  notify: Restart docker
+
+- name: Flush the Docker handlers before the next role uses the daemon
+  # Without this, `Restart docker` would run at the END of the play — after the
+  # application role had already started containers under the OLD daemon
+  # configuration, and, worse, at a point where `live-restore` may not yet be in
+  # effect when the restart actually happens. Flushing here means: configuration is
+  # written, the daemon is restarted under it, and only then does anything start a
+  # container.
+  #
+  # On a converged host no handler is notified and this is a no-op.
+  ansible.builtin.meta: flush_handlers

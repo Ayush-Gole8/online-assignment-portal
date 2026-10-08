@@ -1,0 +1,115 @@
+---
+# ===========================================================================
+# Non-secret variables for the `staging` group.
+#
+# Everything here is safe to commit: identifiers, paths, ports, and the NAMES of
+# the vault variables that hold the secrets. The secrets themselves are in
+# group_vars/vault.yml, which is encrypted with ansible-vault.
+#
+# This file maps the deployment host's contract — the same one the CD pipeline in
+# deploy/deploy-on-host.sh writes to — onto Ansible variables. The host does not
+# know which of the two provisioned it; both read and write the same `.env` keys
+# and the same `compose.prod.yaml` in the same directory
+# (docs/operations/docker-cd.md §5).
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Identity
+# ---------------------------------------------------------------------------
+
+# The environment this host IS. Published by the application at /actuator/info and
+# asserted by the post-deployment smoke test, so "which environment am I looking
+# at" is answered by the thing being looked at rather than by whoever deployed it.
+# It must match the Jenkins DEPLOY_ENV the CD pipeline deploys here with.
+app_environment: staging
+
+# ---------------------------------------------------------------------------
+# Deployment layout — must match the CD pipeline's contract
+# ---------------------------------------------------------------------------
+
+# The directory holding compose.prod.yaml, .env, and deploy-on-host.sh. The same
+# path as DEPLOY_PATH in scripts/ops/env.cmd: a host provisioned by Ansible and a
+# host released to by Jenkins have to agree about where the deployment lives, or
+# the next release lands beside this one instead of replacing it.
+deploy_path: /opt/assignment-portal
+
+# The unprivileged system account that owns the deployment directory and the files
+# in it. The container itself runs as the image's own uid 1001 (Dockerfile), and
+# the uploaded files live in a Docker named volume rather than a bind mount, so
+# this account is about ownership of the deployment directory, not of the data.
+app_user: portal
+app_group: portal
+
+# ---------------------------------------------------------------------------
+# Image identity — Docker Hub, versioned, never `latest`
+# ---------------------------------------------------------------------------
+
+# The Docker Hub repository, as <account>/<name>. ALSO read by the CD pipeline from
+# the host's `.env`; Ansible writes the same value into the same file, so the two
+# cannot disagree about where the image comes from. It is a property of where the
+# image is published, not of any one release.
+image_repository: CHANGE_ME/assignment-portal
+
+# The version this play converges the host to, and the baseline the CD pipeline
+# moves forward from. Never `latest` (ADR-006): a tag that moves is not a version.
+#
+# Note the interaction with the CD pipeline, which rewrites APP_IMAGE_TAG in `.env`
+# on every release (deploy/deploy-on-host.sh). Re-running this playbook therefore
+# resets the host to THIS version — which is correct, and is why the value moves
+# here (or is overridden with `-e app_image_tag=X.Y.Z`) when a release should
+# survive a re-provision. Documented as a limitation in docs/operations/ansible.md §4.
+app_image_tag: "1.0.0"
+
+# ---------------------------------------------------------------------------
+# Published address
+# ---------------------------------------------------------------------------
+
+# Host port the application container is published on. The container always
+# listens on 8080; this is the port it is reachable on from the host.
+app_host_port: 8080
+
+# Interface the application port is bound to. The default binds every interface so
+# the CD pipeline's smoke test can reach the deployment over the network. A host
+# with a reverse proxy in front of the application sets this to 127.0.0.1 so the
+# application is reachable only through the proxy.
+app_bind_address: "0.0.0.0"
+
+# ---------------------------------------------------------------------------
+# Application settings — each has the same default in application.yml
+# ---------------------------------------------------------------------------
+
+session_timeout: 30m
+
+# The Secure cookie attribute. MUST be `true` on any host served over HTTPS — a
+# Secure cookie is not sent over plain http://. Left false here because no TLS
+# terminator is provisioned yet; set it true in the SAME change that adds one,
+# never later (docs/operations/docker-cd.md §9 records the gap).
+session_cookie_secure: false
+
+# Upload limits (FR-7). Passed through from the application's own defaults so an
+# operator can change them without a rebuild.
+upload_max_file_size: 10MB
+upload_max_request_size: 11MB
+
+# Active Spring profiles. Empty means none, which is what a deployment wants — the
+# `dev` profile is what enables the demo-account seeder, and a deployment must
+# never activate it.
+spring_profiles_active: ""
+
+# ---------------------------------------------------------------------------
+# Database and registry
+# ---------------------------------------------------------------------------
+#
+# The database name and user are not secrets and are set here. The passwords and
+# the optional registry credential ARE secrets and live in group_vars/vault.yml
+# under vault_* names; the plain names below are mapped to them, so every role
+# references `db_password` and this file shows exactly where each secret is used
+# without holding a value.
+
+db_name: assignment_portal
+db_username: assignment_portal
+
+db_password: "{{ vault_db_password }}"
+db_root_password: "{{ vault_db_root_password }}"
+registry_username: "{{ vault_registry_username }}"
+registry_password: "{{ vault_registry_password }}"

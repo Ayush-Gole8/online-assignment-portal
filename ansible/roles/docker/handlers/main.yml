@@ -1,0 +1,20 @@
+---
+# Handlers run once, at the END of the play, no matter how many tasks notify them —
+# which is exactly what "restart the daemon once, after every configuration change
+# has been written" means. A daemon.json that is written twice in one run costs one
+# restart, not two.
+#
+# Both handlers are also flushed explicitly by the application role, before it
+# verifies health: a configuration change must have taken effect by the time
+# something asserts the result of it.
+
+- name: Restart docker
+  # Notified by the daemon.json task only. Restarting the daemon for any other
+  # reason — a package upgrade — is the package manager's business.
+  #
+  # `live-restore: true` in the daemon configuration means running containers
+  # survive this restart; without it, this handler would stop the database and the
+  # application and not bring them back.
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted

@@ -1,0 +1,13 @@
+---
+# Ansible content this project depends on. Install before the first run:
+#
+#   ansible-galaxy collection install -r ansible/requirements.yml
+#
+# community.docker supplies the desired-state Docker modules the application role
+# uses — docker_volume, docker_image, docker_login — in preference to shelling out
+# to the docker CLI (docs/operations/ansible.md §4). Those modules run on the
+# target host and import the Docker SDK for Python, which the docker role installs
+# there as `python3-docker`.
+collections:
+  - name: community.docker
+    version: ">=3.4.0"
