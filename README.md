@@ -62,7 +62,7 @@ The application is the vehicle. The pipeline is the point.
 ### Runtime shape
 
 ```
-Browser  --HTTPS-->  Spring Boot (embedded Tomcat, port 8080)
+Browser  --HTTP by default; TLS terminator required externally-->  Spring Boot (embedded Tomcat, port 8080)
                          |
                          +-- Spring Security (session auth, CSRF, role checks)
                          +-- Spring MVC + Thymeleaf (server-rendered pages)
@@ -293,8 +293,9 @@ systemctl status  assignment-portal
 systemctl restart assignment-portal
 ```
 
-Secrets live in `ansible/group_vars/vault.yml`, encrypted with `ansible-vault`. The file is
-referenced explicitly in `site.yml` -- it is not auto-loaded.
+`ansible/group_vars/vault.yml` is referenced explicitly in `site.yml`; it currently contains
+plaintext placeholders only. Replace them with real values and encrypt the file with Ansible Vault
+before provisioning with secrets. Never commit real credentials in plaintext.
 
 **Ansible detail:** [`docs/operations/ansible.md`](docs/operations/ansible.md)
 
@@ -344,7 +345,7 @@ rebuilt**; only the environment changes.
 | `.env.example` | Yes | Variable **names** and documentation only. No values. |
 | `.env` | No (git-ignored) | Real values for local development |
 | Jenkins credentials store | No | `dockerhub-credentials`, `deploy-ssh-key` |
-| `ansible/group_vars/vault.yml` | Yes (encrypted) | DB password, app secrets for staging |
+| `ansible/group_vars/vault.yml` | Yes (currently plaintext placeholders only) | Names/placeholders for DB and optional registry credentials; encrypt before adding real values |
 | `deploy/env.production.example` | Yes | Template for the host `.env` |
 
 Precedence (lowest to highest): `application.yml` then environment variables.
@@ -362,8 +363,9 @@ Key variables:
 | `APP_VERSION` | Baked into the Docker image at build time |
 | `SESSION_COOKIE_SECURE` | `false` without TLS; `true` in production |
 
-A secret is never written into any committed file. `CLAUDE.md` Section 7 rule 1 is the
-authoritative statement of this rule.
+Real secrets must never be written into a committed plaintext file. The currently tracked vault
+file is not encrypted because it contains placeholders only; encrypt it before replacing those
+placeholders with credentials. `CLAUDE.md` Section 7 rule 1 is the authoritative rule.
 
 ---
 
