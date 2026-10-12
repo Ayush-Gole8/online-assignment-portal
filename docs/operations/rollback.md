@@ -134,8 +134,36 @@ machine running it**.
 | Situation | Target | Reason printed |
 | --- | --- | --- |
 | `.env` names a version that is **not** the ledger's last stable one | the ledger's **last stable** | The release changed `.env` and then failed. This is the automatic case |
-| `.env` matches the ledger's last stable version | the stable version **before** it | The operator is deliberately stepping one release back |
+| `.env` matches the ledger's last stable version | the last stable version that is a **different** version | The operator is deliberately stepping one release back |
 | A version was named on the command line | **that** version | Explicit instruction; it wins |
+
+### Why "the stable version before it" means "a *different* version"
+
+"Last stable" is a query over history: the most recent row whose outcome is `success`. "The one
+before it" is a query over the same history, and it would be wrong to read it as *the previous row*.
+
+A `success` row is written by the agent after a deployment verifies — and also after a **rollback**
+verifies. So recovering from one failed release leaves **two `success` rows for the same version**:
+the original deployment, and the rollback that returned to it. That is the ordinary outcome of
+using this mechanism at all, not an edge case.
+
+If `previous-stable` simply took the second-to-last row, it would then name the version already
+running. Two things follow, and both are wrong in the same direction — they make a non-event look
+like a recovery:
+
+- `rollback-on-host.sh`'s *"the host is running X, the only version that has ever succeeded, so
+  there is no earlier stable version to step back to"* refusal keys on an **empty** answer. It
+  would never fire.
+- The request would instead land on the *"X is already the configured version; there is nothing to
+  change"* branch, which exits **0** and prints `rolled-back-to=X`. The agent wrapper reads that as
+  "the host restored X", verifies X (it passes — X is running), and writes a **`success` row** on
+  the strength of a rollback that moved nothing.
+
+`release-ledger.sh previous-stable` therefore returns the most recent `success` row whose version
+**differs** from `last-stable`, or nothing. Filtering by inequality can only ever narrow the
+answer: it yields a version that genuinely recorded a success and is not the one already running,
+or an empty line — and an empty line produces the explicit refusal above rather than a wrong
+target.
 
 ```cmd
 rem See the decision without performing it — the host prints target, from, and why:
@@ -258,6 +286,8 @@ operational decision outside this document's scope.
 | Claim | Status |
 | --- | --- |
 | `rollback-on-host.sh` chooses the ledger's last stable version when `.env` names the failed one | **Written, not run** |
+| `previous-stable` returns a *different* version from `last-stable` when one version holds two `success` rows | **Written, not run.** Corrected in the engineering review of 2026-10-12: the previous definition took the second-to-last `success` row and so returned the version already running, defeating the "no earlier stable version" refusal below it. The corrected query is `stable_versions \| awk -v last="$(…last-stable)" '$0 != last' \| tail -n 1`. It narrows the answer or empties it; it can never name a version that did not record a success |
+| `rollback-on-host.sh` refuses when there is no earlier stable version | **Written, not run.** The refusal is on the empty case, which the correction above is what makes reachable |
 | `rollback-on-host.sh plan` prints the target and the reason and changes nothing | **Written, not run** |
 | The rollback takes a pre-rollback snapshot | **Written, not run** |
 | `release-ledger.sh record` writes a `success` row that makes a version a target | **Written, not run** |

@@ -33,16 +33,22 @@
 #               claim "the release is serving" is the agent's to make.
 #     failed    the attempt did not come up, or did not verify
 #
-#   `last-stable` is the most recent version with a `success` row and
-#   `previous-stable` is the one before it. Nothing is ever edited or deleted — a
-#   correction is a new row, for the same reason submission_status_history is
-#   append-only.
+#   `last-stable` is the most recent version with a `success` row, and
+#   `previous-stable` is the most recent DIFFERENT version with one. The second
+#   definition is not pedantry: a rollback writes another `success` row for the
+#   version it restored, so two consecutive success rows for one version are the
+#   ordinary result of recovering from a failed release. "The one before it" read
+#   as "the second-to-last row" would then name that same version — see the
+#   `previous-stable` branch below for what that costs.
+#
+#   Nothing is ever edited or deleted — a correction is a new row, for the same
+#   reason submission_status_history is append-only.
 #
 # Usage
 #   release-ledger.sh record <version> <environment> <outcome> [<note>]
 #   release-ledger.sh current            # version of the LAST row, whatever it is
 #   release-ledger.sh last-stable        # most recent version with a success row
-#   release-ledger.sh previous-stable    # the success before that one
+#   release-ledger.sh previous-stable    # the last success under a different version
 #   release-ledger.sh history            # the whole ledger, raw
 #   release-ledger.sh path               # the ledger file's location
 #
@@ -63,6 +69,12 @@ ensure_ledger() {
 }
 
 # Every version that has a success row, oldest first. Absent ledger = no output.
+#
+# Note what this does NOT do: it does not collapse repeats. The same version legitimately
+# appears more than once — a rollback restores a version that already had a success row, and
+# the agent writes a second one for it after verifying the restore — so the stream is a
+# history of successes, not a list of distinct versions. `previous-stable` is what has to
+# cope with that, not this.
 stable_versions() {
     [ -f "$LEDGER_FILE" ] || return 0
     awk -F'\t' '$4 == "success" { print $2 }' "$LEDGER_FILE"
@@ -102,7 +114,29 @@ case "$cmd" in
         ;;
 
     previous-stable)
-        stable_versions | tail -n 2 | head -n 1
+        # The most recent version that recorded a success AND differs from the last stable
+        # one — not simply the second-to-last success row.
+        #
+        # Why the difference matters. A rollback restores a version that already had a success
+        # row, and the agent then writes a second one for it, so consecutive success rows for
+        # ONE version are the normal outcome of recovering from a failed release, not an edge
+        # case. Taking the second-to-last row would then return that same version, and
+        # `previous-stable == last-stable` has two consequences, both wrong:
+        #
+        #   * rollback-on-host.sh's "there is no earlier stable version to step back to"
+        #     refusal keys on an EMPTY previous-stable, so it would not fire;
+        #   * the operator who asked to step one release back would instead get
+        #     `TARGET == CONFIGURED_TAG`, the "nothing to change" branch, which exits 0 and
+        #     prints `rolled-back-to=<version>` — a successful rollback reported for a
+        #     rollback that changed nothing, and a `success` row written on the strength of it.
+        #
+        # Filtering by inequality can only ever narrow the answer: it returns a version that
+        # genuinely recorded a success and is not the one already running, or nothing at all
+        # — and nothing at all produces rollback-on-host.sh's explicit refusal rather than a
+        # wrong target.
+        last_stable="$(stable_versions | tail -n 1)"
+        [ -n "$last_stable" ] || exit 0
+        stable_versions | awk -v last="$last_stable" '$0 != last' | tail -n 1
         ;;
 
     history)

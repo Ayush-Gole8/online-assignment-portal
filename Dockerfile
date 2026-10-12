@@ -125,10 +125,10 @@ RUN groupadd --gid 1001 portal \
 WORKDIR /app
 
 # The four layers, in dependency order …
-COPY --from=unpack --chown=portal:portal /unpack/extracted/dependencies/ ./
-COPY --from=unpack --chown=portal:portal /unpack/extracted/spring-boot-loader/ ./
-COPY --from=unpack --chown=portal:portal /unpack/extracted/snapshot-dependencies/ ./
-COPY --from=unpack --chown=portal:portal /unpack/extracted/application/ ./
+COPY --from=unpack --chown=root:root /unpack/extracted/dependencies/ ./
+COPY --from=unpack --chown=root:root /unpack/extracted/spring-boot-loader/ ./
+COPY --from=unpack --chown=root:root /unpack/extracted/snapshot-dependencies/ ./
+COPY --from=unpack --chown=root:root /unpack/extracted/application/ ./
 
 # … and the one directory that must stay writable.
 #

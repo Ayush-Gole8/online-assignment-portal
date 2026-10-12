@@ -23,8 +23,8 @@ import jakarta.persistence.Table;
  * A portal user: the identity behind every request (data-model.md §2).
  *
  * <p>Maps the {@code users} table created by {@code V1__baseline.sql}. Hibernate validates this
-    @JdbcTypeCode(SqlTypes.VARCHAR)
- * (ADR-003).
+ * mapping against that table at startup and the schema is never generated from the entity, so the
+ * migration is the only authority on the column types (ADR-003).
  *
  * <p><strong>This entity does not leave the {@code auth} feature.</strong> Controllers hand
  * records to templates; the security layer converts it to an {@code AuthenticatedUser}. The
