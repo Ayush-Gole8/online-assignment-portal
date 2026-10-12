@@ -80,6 +80,13 @@ rem reads it. Only used to derive DEPLOY_BASE_URL; it is the host's `.env` that
 rem actually decides the binding.
 if not defined APP_HOST_PORT set "APP_HOST_PORT=8080"
 
+rem The two directories under DEPLOY_PATH that hold the release record and the
+rem backups. Computed on the host from DEPLOY_PATH by deploy/host-common.sh; named
+rem here too so the agent-side scripts can refer to a path in a report or a
+rem diagnostic line without asking the host for it first.
+if not defined DEPLOY_RELEASES_PATH set "DEPLOY_RELEASES_PATH=%DEPLOY_PATH%/releases"
+if not defined DEPLOY_BACKUPS_PATH set "DEPLOY_BACKUPS_PATH=%DEPLOY_PATH%/backups"
+
 rem ---------------------------------------------------------------------------
 rem Naming
 rem ---------------------------------------------------------------------------

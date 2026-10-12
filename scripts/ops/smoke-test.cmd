@@ -6,12 +6,13 @@ rem Post-deployment smoke test. Step 10 of the release process.
 rem
 rem What this does
 rem   Checks that a deployment is serving, that it is the release that was meant
-rem   to be deployed, and that it renders. Five HTTP requests: health, the version
-rem   the application reports, the environment it reports, the sign-in page, and
-rem   the anonymous redirect.
+rem   to be deployed, and that it renders and guards. Seven HTTP requests: health,
+rem   the version the application reports, the environment it reports, the sign-in
+rem   page, the anonymous redirect, the sign-in form's CSRF token, and the
+rem   anonymous refusal on the /submissions business route.
 rem
 rem Where the checks live, and why not here
-rem   In smoke-test.ps1 beside this file. The five checks build and read JSON and
+rem   In smoke-test.ps1 beside this file. The checks build and read JSON and
 rem   HTML responses, and writing that as a cmd script means either a fistful of
 rem   findstr against JSON — which breaks on whitespace — or one unreadable
 rem   PowerShell line inside a .cmd, which is how scripts stop being reviewed.

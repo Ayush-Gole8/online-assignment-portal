@@ -6,7 +6,7 @@
     Answers one question: is the release that was just deployed actually serving,
     and is it the release that was meant to be deployed?
 
-    Five checks, and each exists because a different one of them can pass while
+    Seven checks, and each exists because a different one of them can pass while
     the deployment is still wrong:
 
       1. /actuator/health answers a Spring health document reporting UP.
@@ -14,6 +14,19 @@
       3. /actuator/info reports the environment the pipeline targeted.
       4. /login renders, and renders a form with the email field in it.
       5. / redirects an anonymous visitor to /login.
+      6. /login's form carries a CSRF token, so the application's own
+         state-changing protection is live (CLAUDE.md §7 rule 3).
+      7. /submissions redirects an anonymous visitor, so the domain's
+         authorization boundary holds on a real business route and not only on /.
+
+    Why 6 and 7 are here, and why they take no credential
+        They are the two things a deployment must establish about the APPLICATION
+        rather than about its port: that CSRF protection is in effect, and that a
+        business route refuses an anonymous caller. Each fails for a page served
+        without the security integration or for a route that is not there, and
+        neither needs an account — which matters, because a smoke test that stored
+        a credential would have to keep it on the machine it is checking, and that
+        is the one thing a smoke test should never carry.
 
     Why 2 and 3 are the important ones
         A deployment that pulled a stale image, or that the host was already
@@ -26,7 +39,7 @@
 
     Why 4 and 5, when the browser suite already proves the pages work
         They are not the same claim, and this script is not a second end-to-end
-        suite — it is four HTTP requests, and the pyramid stays a pyramid
+        suite — it is a handful of HTTP requests, and the pyramid stays a pyramid
         (CLAUDE.md §6). The browser suite proves the application's behaviour on a
         test deployment the pipeline built itself. This proves that a template
         rendered and that the security filter chain answered, on the deployment
@@ -188,16 +201,21 @@ catch {
 # 5. Anonymous access is redirected, so the security filter chain is live
 # ---------------------------------------------------------------------------
 try {
-    $home = Get-WebResponse -Uri "$BaseUrl/" -MaximumRedirection 0
+    # `$homePage`, not `$home`: `$HOME` is a PowerShell automatic variable, and
+    # assigning to it is what PSScriptAnalyzer reports as
+    # AvoidAssignmentToAutomaticVariable. The old name was a latent failure in the
+    # one script a release depends on, found while the release tooling was being
+    # extended.
+    $homePage = Get-WebResponse -Uri "$BaseUrl/" -MaximumRedirection 0
     # A redirect to /login means the filter chain refused an anonymous request,
     # which is the behaviour every security test asserts. A 200 here would mean
     # an unauthenticated visitor reached a page they should not have.
-    if ($home.StatusCode -ge 300 -and $home.StatusCode -lt 400) {
-        Add-Result -Name 'anonymous-redirect' -Passed $true -Detail ("an anonymous request for / answered {0}" -f $home.StatusCode)
+    if ($homePage.StatusCode -ge 300 -and $homePage.StatusCode -lt 400) {
+        Add-Result -Name 'anonymous-redirect' -Passed $true -Detail ("an anonymous request for / answered {0}" -f $homePage.StatusCode)
     }
     else {
         Add-Result -Name 'anonymous-redirect' -Passed $false -Detail (
-            'an anonymous request for / answered {0}, expected a redirect to the sign-in page. The security filter chain is not what the source says it is.' -f $home.StatusCode)
+            'an anonymous request for / answered {0}, expected a redirect to the sign-in page. The security filter chain is not what the source says it is.' -f $homePage.StatusCode)
     }
 }
 catch {
@@ -205,6 +223,58 @@ catch {
     # exception path above reads the 3xx off it. A throw that reaches here has no
     # response at all, which is a different failure and is reported as one.
     Add-Result -Name 'anonymous-redirect' -Passed $false -Detail (
+        'the request failed rather than answering: {0}' -f $_.Exception.Message)
+}
+
+# ---------------------------------------------------------------------------
+# 6. The sign-in form carries a CSRF token.
+#
+# This is a check about the APPLICATION, not about a port. SecurityConfiguration
+# keeps CSRF enabled and the sign-in template uses `th:action`, which is what makes
+# Thymeleaf's Spring Security integration inject the hidden `_csrf` field. A page
+# that rendered without it would sign nobody in — every POST would be refused by
+# CsrfFilter with a 403 — and would still answer 200 to check 4. The token is
+# per-session and is not a credential this script keeps: it is read, asserted to be
+# present, and discarded.
+# ---------------------------------------------------------------------------
+try {
+    $form = Get-WebResponse -Uri "$BaseUrl/login" -MaximumRedirection 5
+    $csrfMarker = 'name=' + [char]34 + '_csrf' + [char]34
+    if ($form.StatusCode -ne 200) {
+        Add-Result -Name 'csrf-token' -Passed $false -Detail ("the sign-in page answered {0}, expected 200" -f $form.StatusCode)
+    }
+    elseif ($form.Content -notlike ('*' + $csrfMarker + '*')) {
+        Add-Result -Name 'csrf-token' -Passed $false -Detail 'the sign-in page rendered no CSRF field; the Spring Security template integration is not in effect'
+    }
+    else {
+        Add-Result -Name 'csrf-token' -Passed $true -Detail 'the sign-in form carries a CSRF token'
+    }
+}
+catch {
+    Add-Result -Name 'csrf-token' -Passed $false -Detail ('the request failed: {0}' -f $_.Exception.Message)
+}
+
+# ---------------------------------------------------------------------------
+# 7. A business route refuses an anonymous visitor.
+#
+# / is the generic case; /submissions is a domain route, and the claim is the one
+# CLAUDE.md §7 rule 8 makes — authorisation is decided server-side, on every
+# request, from the authenticated principal. An anonymous request that reached it
+# would be a 200, and a 404 would mean the route is not deployed. Only a redirect
+# to the sign-in page shows the boundary is in place on the route that matters.
+# ---------------------------------------------------------------------------
+try {
+    $businessRoute = Get-WebResponse -Uri "$BaseUrl/submissions" -MaximumRedirection 0
+    if ($businessRoute.StatusCode -ge 300 -and $businessRoute.StatusCode -lt 400) {
+        Add-Result -Name 'business-route-guard' -Passed $true -Detail ("an anonymous request for /submissions answered {0}" -f $businessRoute.StatusCode)
+    }
+    else {
+        Add-Result -Name 'business-route-guard' -Passed $false -Detail (
+            'an anonymous request for /submissions answered {0}, expected a redirect to the sign-in page. The route is either not deployed or not guarded.' -f $businessRoute.StatusCode)
+    }
+}
+catch {
+    Add-Result -Name 'business-route-guard' -Passed $false -Detail (
         'the request failed rather than answering: {0}' -f $_.Exception.Message)
 }
 

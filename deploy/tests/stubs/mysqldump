@@ -1,0 +1,37 @@
+#!/bin/sh
+# A stub of `mysqldump`, for the release/rollback demo.
+#
+# It prints a plausible dump — one that starts with the marker backup.sh checks
+# for before it will accept a file as a backup. That check is the reason this stub
+# emits a header rather than nothing: a stub that printed an empty file would make
+# backup.sh REFUSE, and the demo would be exercising the refusal rather than the
+# backup.
+#
+# It is on PATH only inside the `compose exec db` the stub docker performs, which
+# is why the real backup.sh needed no change to be testable.
+
+set -eu
+
+cat <<'DUMP'
+-- MySQL dump 10.13  Distrib 8.4.0, for Linux (x86_64)
+--
+-- Host: localhost    Database: assignment_portal
+-- ------------------------------------------------------
+-- Server version	8.4.0
+
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET NAMES utf8mb4 */;
+
+DROP TABLE IF EXISTS `submissions`;
+CREATE TABLE `submissions` (
+  `id` varchar(36) NOT NULL,
+  `status` varchar(16) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO `submissions` VALUES ('stub-row-1','SUBMITTED');
+
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+
+-- Dump completed
+DUMP

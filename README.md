@@ -34,12 +34,18 @@ The application is deliberately modest. The engineering objective of this reposi
 > [`Dockerfile`](Dockerfile) that packages the JAR into a production image; release — a `vX.Y.Z`
 > git tag is the version, the image is published to Docker Hub under it
 > ([`deploy/`](deploy), [`scripts/ops/`](scripts/ops),
-> [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)); and provisioning — an
+> [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)); provisioning — an
 > [`ansible/`](ansible) tree that takes a bare host to one running the stack as a managed systemd
-> service ([`docs/operations/ansible.md`](docs/operations/ansible.md)). **Nothing in any of it has
-> run to green: the image has never been built, no image has been pushed, no host has been
-> contacted, no rollback has fired, and no playbook has been executed.** What is still genuinely
-> absent is TLS, a firewall, and a backup/restore story for the volumes.
+> service ([`docs/operations/ansible.md`](docs/operations/ansible.md)); and release control and
+> recovery — the pre-release gate, the append-only release ledger, backups for both halves of a
+> submission, and an operational rollback
+> ([`docs/operations/release-runbook.md`](docs/operations/release-runbook.md),
+> [`rollback.md`](docs/operations/rollback.md),
+> [`backup-restore.md`](docs/operations/backup-restore.md)). **Nothing in any of it has run to
+> green: the image has never been built, no image has been pushed, no host has been contacted, no
+> rollback has fired, no playbook has been executed, no backup has been taken and no restore has
+> been performed.** What is still genuinely absent is TLS, a firewall, and a restore that has ever
+> been rehearsed.
 >
 > See [Unverified claims](#unverified-claims) before relying on any statement below.
 >
@@ -250,6 +256,9 @@ contract, and a claim-by-claim list of what has not been run are in `docker-cd.m
 | [`docs/operations/docker.md`](docs/operations/docker.md) | The production image, the Compose stack, and the container lifecycle |
 | [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md) | The release process: what each ref does, publishing to Docker Hub, deploying and rolling back |
 | [`docs/operations/ansible.md`](docs/operations/ansible.md) | Provisioning a Linux host: the inventory, the roles, the variables, the vault, idempotency, and the systemd service |
+| [`docs/operations/release-runbook.md`](docs/operations/release-runbook.md) | How to run a release: the checklist, the procedure, the record, and what each class of failure means |
+| [`docs/operations/rollback.md`](docs/operations/rollback.md) | How to go back, and the one rule that decides whether going back is safe |
+| [`docs/operations/backup-restore.md`](docs/operations/backup-restore.md) | What is backed up, when, and how to restore it — and the row/bytes asymmetry that makes it two problems |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to propose a change |
 | [`SECURITY.md`](SECURITY.md) | How uploads, secrets, and vulnerabilities are handled |
 
@@ -315,13 +324,19 @@ of the pipeline exists — [`Jenkinsfile`](Jenkinsfile) runs the build, the unit
 Selenium suites, a started test environment, and the quality gate that refuses to build an image
 from a failed revision. The image is defined: a multi-stage [`Dockerfile`](Dockerfile) that packages
 the JAR Maven built. The delivery half is now written too — the release process (`deploy/`,
-`scripts/ops/`, [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)) and provisioning
-([`ansible/`](ansible), [`docs/operations/ansible.md`](docs/operations/ansible.md)). What is still
-absent is TLS, a firewall, and a backup/restore story for the volumes.
+`scripts/ops/`, [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)), provisioning
+([`ansible/`](ansible), [`docs/operations/ansible.md`](docs/operations/ansible.md)), and release
+control and recovery ([`release-runbook.md`](docs/operations/release-runbook.md),
+[`rollback.md`](docs/operations/rollback.md),
+[`backup-restore.md`](docs/operations/backup-restore.md)). What is still absent is TLS, a firewall,
+and a restore that has ever been rehearsed.
 
 The image is **written, not built** — `Dockerfile` and `compose.yaml` were added in a sandbox with no
-route to a registry, so no `docker build` has run. The same is true of every delivery and
-provisioning artefact: no push, no deploy, no rollback, no playbook run. See
+route to a registry, so no `docker build` has run. The same is true of every delivery, provisioning
+and recovery artefact: no push, no deploy, no rollback, no playbook run, no backup, no restore.
+`deploy/tests/release-rollback-demo.sh` was written to exercise the release and rollback scripts
+against a stubbed Docker daemon and a stub application, **and it has itself never run** — so it
+furnishes no evidence either. See
 [`docs/operations/docker.md` §8](docs/operations/docker.md) for the list of unverified claims and
 the commands that would close them.
 
@@ -418,7 +433,11 @@ neither set has been run at all:
 | The pipeline publishes a versioned image to Docker Hub | **Not run** — nothing has been pushed. The rules are in [docker-cd.md §2](docs/operations/docker-cd.md) |
 | The application reports its own version at `/actuator/info` | **Asserted, not run** — `AuthorizationIT` covers it; the suite has not executed since the endpoint was added |
 | A release is deployed to a host and verified by a smoke test | **Not run** — no host has been contacted |
-| A failed deployment rolls back to the previous version | **Not run** — the rollback has never fired. [docker-cd.md §7](docs/operations/docker-cd.md) |
+| A failed deployment rolls back to the previous version | **Not run** — no rollback has fired, on a host or against a stub. [rollback.md §9](docs/operations/rollback.md) |
+| The release ledger answers "what was the last version that worked" | **Not run** — nothing has written a `success` row. [release-runbook.md §5](docs/operations/release-runbook.md) |
+| `pre-release.sh` takes a MySQL dump before the swap and refuses when it cannot | **Not run** — no backup has been taken from a real database. [backup-restore.md §6](docs/operations/backup-restore.md) |
+| A backup is restored and the restored data is verified | **Not run** — no restore has ever been performed. A backup that has never been restored from is a hypothesis |
+| The release and rollback mechanism, driven end to end under a stubbed Docker daemon | **Not run** — `deploy/tests/release-rollback-demo.sh` exists to do this and has never been executed, so it yields no transcript and no evidence |
 | The release gate keeps a feature branch out of the registry and off a host | **Not run** — the equivalent gate on the image build is observed to skip in [defect-demonstration.md](docs/evidence/defect-demonstration.md); the two new gates have not been exercised |
 | `ansible-playbook` installs Docker and runs the stack as `assignment-portal.service` | **Not run** — nothing in [ansible/](ansible) has been executed. [ansible.md §9](docs/operations/ansible.md) |
 | The second Ansible run converges with `changed=0` | **Not run** — this is the demonstration the playbook exists to make |
