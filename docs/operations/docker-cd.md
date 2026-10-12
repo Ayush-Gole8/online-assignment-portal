@@ -10,6 +10,14 @@ prove a change before anything is published. This document describes what happen
 the version a build is, the registry it is published to, the host it reaches, the health check
 after it, and the way back if any of it goes wrong.
 
+Three documents carry the operational half of that in detail, and this page defers to them:
+
+| Document | Covers |
+| --- | --- |
+| [`release-runbook.md`](release-runbook.md) | The pre-release checklist, the eleven-step procedure, the release ledger and the release metadata, health and smoke verification, the backward-compatibility rule, and how to tell one class of failure from another |
+| [`rollback.md`](rollback.md) | The safety rule, target selection, the operational command, the outcomes, and what to do when a rollback will not work |
+| [`backup-restore.md`](backup-restore.md) | What is backed up and when, where it lives, and how to restore it |
+
 The boundary is deliberate and worth stating. Integration ends when the suites are green and a
 JAR exists. Delivery begins when a human decides this revision is a release — expressed as a git
 tag — and ends when a smoke test has confirmed that the thing answering requests is the thing
@@ -79,8 +87,8 @@ are the deployment, and steps 5–11 run only when the build is green **and** th
 | 7 | Update the deployment configuration | `deploy/deploy-on-host.sh` | Rewrites exactly two lines of the host's `.env` — `APP_IMAGE_TAG`, `APP_ENVIRONMENT` |
 | 8 | Restart / update the containers | `deploy/deploy-on-host.sh` | `docker compose up -d --no-build --remove-orphans --wait app` |
 | 9 | Wait for health | `scripts/ci/wait-for-health.cmd`, from the agent | Polls the deployment's `/actuator/health` over the network until it reports `UP` |
-| 10 | Run the smoke test | `scripts/ops/smoke-test.ps1` | Five checks, including that the running release reports its own version |
-| 11 | Report, and roll back on failure | `scripts/ops/deploy-release.cmd` | Writes `target/deployment-report.txt`; on a failed 8, 9 or 10, redeploys the previous version |
+| 10 | Run the smoke test | `scripts/ops/smoke-test.ps1` | Seven checks, including that the running release reports its own version, that the sign-in form carries a CSRF token, and that a business route refuses an anonymous caller |
+| 11 | Report, and roll back on failure | `scripts/ops/deploy-release.cmd` | Writes `target/deployment-report.txt` and a `success` row in the host's ledger; on a failed 8, 9 or 10, corrects the ledger to `failed` and calls `scripts/ops/rollback-release.cmd` |
 
 Everything above step 3 is the `Release Version` stage in the [`Jenkinsfile`](../../Jenkinsfile).
 Each step is a script rather than an inline sequence, for one reason: a deployment that has gone
@@ -173,18 +181,32 @@ unverified host key that actually caused it.
 
 ## 5. The deployment host contract
 
-A deployment host holds three things in `DEPLOY_PATH` (default `/opt/assignment-portal`):
+A deployment host holds the following in `DEPLOY_PATH` (default `/opt/assignment-portal`):
 
 | File | Placed by | Frequency |
 | --- | --- | --- |
-| `compose.prod.yaml` | `deploy-release.cmd`, over `scp` | **every release** |
-| `deploy-on-host.sh` | `deploy-release.cmd`, over `scp` | **every release** |
+| `compose.prod.yaml` | `scripts/ops/copy-host-scripts.cmd`, over `scp` | **every release** |
+| `host-common.sh` | `scripts/ops/copy-host-scripts.cmd` | **every release** |
+| `deploy-on-host.sh` | `scripts/ops/copy-host-scripts.cmd` | **every release** |
+| `pre-release.sh` | `scripts/ops/copy-host-scripts.cmd` | **every release** |
+| `release-ledger.sh` | `scripts/ops/copy-host-scripts.cmd` | **every release** |
+| `backup.sh` | `scripts/ops/copy-host-scripts.cmd` | **every release** |
+| `rollback-on-host.sh` | `scripts/ops/copy-host-scripts.cmd` | **every release** |
 | `.env` | A human, once, when the host is provisioned | never by the pipeline (except two lines) |
+| `releases/` | `copy-host-scripts.cmd` creates it; `pre-release.sh` writes into it | grows one ledger row and one context file per release |
+| `backups/` | `copy-host-scripts.cmd` creates it; `pre-release.sh` writes into it | grows one dump per release — see [`backup-restore.md`](backup-restore.md) §4 |
 
-Both files are copied on **every** release rather than only when they have changed, so the host
-runs the composition and the script that are in the tag being deployed — the only version of
-either that has been reviewed alongside the code it is about to run. A host left holding last
-month's compose file is a host whose behaviour nobody can predict from the repository.
+Every file is copied on **every** release, and on every rollback, rather than only when it has
+changed, so the host runs the composition and the scripts that are in the tag being deployed — the
+only version of any of them that has been reviewed alongside the code it is about to run. A host
+left holding last month's compose file is a host whose behaviour nobody can predict from the
+repository.
+
+**The set is defined in exactly one place** — `scripts/ops/copy-host-scripts.cmd` — and both the
+deploy path and the rollback path call it. `deploy-on-host.sh` sources `host-common.sh`, and
+`pre-release.sh` and `rollback-on-host.sh` source both, so a host holding a new `deploy-on-host.sh`
+over an older `host-common.sh` fails at the next release for a reason nothing on the host explains.
+Two lists of files would be two lists that drift the first time a script is added.
 
 Provision the host once, from the template:
 
@@ -270,7 +292,7 @@ a disclosure rather than a mistake — `application.yml` says so at the declarat
 
 ### The smoke test
 
-Five checks, and each exists because a different one can pass while the deployment is still wrong:
+Seven checks, and each exists because a different one can pass while the deployment is still wrong:
 
 | Check | Claim it establishes |
 | --- | --- |
@@ -279,12 +301,19 @@ Five checks, and each exists because a different one can pass while the deployme
 | `/actuator/info` `app.environment` equals the target environment | The release was aimed at the host it landed on |
 | `/login` answers 200 and renders an `email` field | A template rendered — not merely that a port is open |
 | `/` answers 3xx for an anonymous visitor | The security filter chain is live |
+| `/login`'s form carries a CSRF field | State-changing protection is in effect (`CLAUDE.md` §7 rule 3) |
+| `/submissions` answers 3xx for an anonymous visitor | The authorization boundary holds on a **business route**, and not only on `/` (`CLAUDE.md` §7 rule 8) |
 
-It is four HTTP requests, not a second end-to-end suite; the pyramid stays a pyramid
+It is a handful of HTTP requests, not a second end-to-end suite; the pyramid stays a pyramid
 (CLAUDE.md §6). It deliberately does **not** check that the database has the right rows, that an
 upload works, or that a reviewer can approve — those are the browser suite's job on a deployment
 the pipeline built itself, and a smoke test that duplicated them would be a slower, weaker copy
 that needed credentials, which is the one thing a smoke test should never carry.
+
+Checks 6 and 7 are the two that are about the **application** rather than about a port, and neither
+needs an account — which is what lets them be here at all. A deployment that started, bound its
+port and served every page without the security integration would answer 200 to checks 1, 2, 3, 4
+and 5 and be wrong.
 
 ---
 
@@ -293,14 +322,18 @@ that needed credentials, which is the one thing a smoke test should never carry.
 **A rollback is not a separate operation; it is the second half of a failed deployment.** It is
 handled inside `deploy-release.cmd`, on the failure paths, for three reasons:
 
-1. **The target is read, not remembered.** `deploy-on-host.sh` prints `previous=<version>` on its
-   first line, *before* it changes anything, and the agent reads that line out of the host's own
-   output. The version to return to is what the host actually had thirty seconds ago.
+1. **The target is read, not remembered.** The host prints `previous=<version>` on its first line,
+   *before* it changes anything, and the agent reads that line out of the host's own output. The
+   value comes from the host's **release ledger** — the append-only record of which attempts
+   actually recorded a `success` — and not from the host's `.env`, which a failed release rewrites
+   before it can fail. See [`release-runbook.md`](release-runbook.md) §5.
 2. **The system is left as it was found, without anyone having to notice.** By the time the stage
    returns, the host is serving the previous version. A red build that also left the host broken
    would be two problems.
-3. **It is the same operation.** Rollback calls `deploy-on-host.sh deploy <previous> <env>` — the
-   code path exercised on the happy path, so what runs when it matters is what runs normally.
+3. **It is the same command an operator runs.** The failure path calls
+   `scripts/ops/rollback-release.cmd` — the operational rollback — rather than performing its own
+   redeploy, so what runs when it matters is what runs normally, and what has been read and
+   rehearsed.
 
 It fires when the release *started* but did not **verify** — a failed health check or a failed
 smoke test — and when the release did not start at all after the host had been reached.
@@ -317,15 +350,19 @@ What a rollback does **not** do, and what it does instead:
 | Not undone | Why | What to do |
 | --- | --- | --- |
 | The published image | The registry is a record; a release that was published stays published | Publish a new version. Never delete a tag somebody may have deployed |
-| A database migration | Flyway is forward-only (ADR-003) | The rollback redeploys application code against a schema that is already migrated. A release whose migration is not backward-compatible needs a forward fix, and this is a real limitation, not a hidden one |
+| A database migration | Flyway is forward-only (ADR-003) | The rollback redeploys application code against a schema that is already migrated. **This is safe only when the migration was backward compatible** — the one rule no script can enforce, stated in [`rollback.md`](rollback.md) §2 |
+| A database's **contents** | Reversing a release's rows would discard everything written since, including work by users who had nothing to do with the release | A restore — [`backup-restore.md`](backup-restore.md) §5 |
 | Whatever the failed release already served | Traffic was live during the window | Rollback bounds the window; it does not erase it |
 
-The three outcomes are distinguished in `target/deployment-report.txt`, because "it rolled back"
-and "it rolled back and that also failed" are different incidents:
+The outcomes are distinguished in `target/deployment-report.txt` and `target/rollback-report.txt`,
+because "it rolled back" and "it rolled back and that also failed" are different incidents:
 
 - `FAILED, ROLLED BACK TO <version>` — the expected outcome, and the host is healthy on the old release
 - `FAILED, ROLLBACK TO <version> ALSO FAILED` — **needs a human.** The host is in an unknown state
 - `FAILED, HOST UNREACHABLE - NOTHING CHANGED` / `FAILED, NOTHING TO ROLL BACK TO` — no action on the host was needed
+
+The full procedure, the target-selection rules, the operational command and the failure classes are
+[`rollback.md`](rollback.md).
 
 ---
 
@@ -347,7 +384,7 @@ and no rollback has fired.
 | `docker compose pull` before `up` | **Written, not run** |
 | `docker compose up --wait` blocks until the healthcheck passes | **Written, not run**; `--wait` requires the Compose **v2 plugin**, which is not recorded in [`toolchain.md`](toolchain.md) |
 | The `Deploy` stage's `when` gates skip a feature branch | **Written, not run**; the equivalent gates on `Docker Build` are observed to skip — `docs/evidence/defect-demonstration.md` |
-| The rollback restores the previous version | **Written, not run** |
+| The rollback restores the previous version | **Written, not run.** No rollback has fired on a host, and the host-side target selection and restore have not been exercised either — `deploy/tests/release-rollback-demo.sh`, written to do so against a stubbed daemon, has never run |
 | The `Publish Image` and `Deploy` stages appear in the Jenkins UI with the right parameters | **Written, not run** |
 | The agent's `known_hosts` holds the deployment host's key | **Not provisioned** — this is a host-side prerequisite, not a repository artefact |
 | A `dockerhub-credentials` entry and a `deploy-ssh-key` entry exist in Jenkins | **Not created** |
@@ -380,10 +417,12 @@ What this process does not do, stated rather than left to be discovered:
   `application` role can bring up the same stack as `assignment-portal.service` when a host is
   provisioned that way. Neither is wired to the other: the `Deploy` stage still uses
   `deploy-on-host.sh` over `ssh`, and `ansible/site.yml` is not invoked by any stage.
-- **No image digest recorded.** The deployment names a tag, not a digest. A tag can be re-pointed
-  upstream; `docker push` prints the manifest digest and it is left in the console for this
-  reason, but nothing pins a deployment to it. Recording it is the obvious next step and is not
-  taken.
+- **The image digest is recorded but nothing pins a deployment to it.** A deployment still names a
+  tag, and a tag can be re-pointed upstream. `releases/<version>.env` now carries `IMAGE_DIGEST` —
+  `deploy-on-host.sh` reads it from the image it started — so an operator can *tell* whether a tag
+  moved. Nothing *enforces* it: there is no pre-pull check that the digest the host is about to pull
+  is the digest the previous deployment recorded. Closing that gap means pulling by digest rather
+  than by tag, which is the obvious next step and is not taken.
 - **No notification.** A failed deployment is a red build and an archived report. Nobody is
   paged, and the rollback's outcome is not sent anywhere a person would see it without opening
   the build.

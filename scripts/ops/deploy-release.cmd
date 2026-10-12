@@ -92,23 +92,18 @@ echo [deploy-release] Deployment directory: %DEPLOY_PATH%
 echo [deploy-release] Smoke test base URL: %DEPLOY_BASE_URL%
 
 rem ---------------------------------------------------------------------------
-rem 1. Place the composition and the host-side script on the target.
+rem 1. Place the composition and the host-side scripts on the target.
 rem
-rem Both are copied on EVERY release, not only when they have changed. The host
-rem then runs the composition and the script that are in the tag being deployed,
-rem which is the only version of either that has been reviewed alongside the code
-rem it is about to run. A host left holding last month's compose file is a host
-rem whose behaviour nobody can predict from the repository.
+rem Deferred to copy-host-scripts.cmd, which rollback-release.cmd also calls, so
+rem that both paths place the SAME set of files: deploy-on-host.sh SOURCES
+rem host-common.sh, and pre-release.sh and rollback-on-host.sh source both. A host
+rem holding a new deploy-on-host.sh over an older host-common.sh fails at the next
+rem release for a reason nothing on the host explains, and two lists of files are
+rem two lists that drift.
 rem ---------------------------------------------------------------------------
-echo [deploy-release] Copying the composition and the deployment script...
+echo [deploy-release] Copying the composition and the deployment scripts...
 
-ssh %SSH_OPTS% %DEPLOY_HOST% "mkdir -p %DEPLOY_PATH%"
-if errorlevel 1 goto :transport_failed
-
-scp %SSH_OPTS% "deploy\compose.prod.yaml" "%DEPLOY_HOST%:%DEPLOY_PATH%/compose.prod.yaml"
-if errorlevel 1 goto :transport_failed
-
-scp %SSH_OPTS% "deploy\deploy-on-host.sh" "%DEPLOY_HOST%:%DEPLOY_PATH%/deploy-on-host.sh"
+call "%~dp0copy-host-scripts.cmd"
 if errorlevel 1 goto :transport_failed
 
 rem ---------------------------------------------------------------------------
@@ -160,7 +155,19 @@ echo [deploy-release] Container state after the deployment:
 ssh %SSH_OPTS% %DEPLOY_HOST% "cd %DEPLOY_PATH% && docker compose -f compose.prod.yaml ps"
 
 rem ---------------------------------------------------------------------------
-rem 5. The report. Written whether the deployment succeeded or failed, because a
+rem 5. Record the release as STABLE.
+rem
+rem   The host recorded `deployed` when the container started — its own
+rem   healthcheck passed. `success` is a stronger claim, and it is this agent's to
+rem   make: it has just polled /actuator/health over the network and run the smoke
+rem   test. Writing it here is what makes this version the one a later rollback
+rem   returns to, so a version only becomes a rollback target after it has been
+rem   verified from OUTSIDE the machine running it.
+rem ---------------------------------------------------------------------------
+call :record_ledger "success" "verified from the agent"
+
+rem ---------------------------------------------------------------------------
+rem 6. The report. Written whether the deployment succeeded or failed, because a
 rem    deployment record that only exists for the good outcome is a record that
 rem    cannot explain the bad one.
 rem ---------------------------------------------------------------------------
@@ -169,6 +176,19 @@ call :write_report "SUCCESS"
 type "%DEPLOY_REPORT%"
 echo [deploy-release] Deployed %RELEASE_VERSION% to %DEPLOY_ENV%.
 endlocal
+exit /b 0
+
+:record_ledger
+rem Write one outcome row into the host's release ledger.
+rem %~1 is the outcome, %~2 the note. The note is single-quoted so the remote
+rem shell receives it as one argument; cmd does not interpret single quotes, so
+rem they survive into the ssh command line and are stripped there.
+if not defined DEPLOY_HOST exit /b 0
+ssh %SSH_OPTS% %DEPLOY_HOST% "cd %DEPLOY_PATH% && DEPLOY_DIR=%DEPLOY_PATH% sh release-ledger.sh record %RELEASE_VERSION% %DEPLOY_ENV% %~1 '%~2'"
+if errorlevel 1 (
+    echo [deploy-release] WARNING: the host ledger could not be told that %RELEASE_VERSION% is '%~1'.
+    echo [deploy-release] The deployment itself is unaffected. The ledger may under-report this release, which affects which version a later rollback treats as stable.
+)
 exit /b 0
 
 :write_report
@@ -203,6 +223,11 @@ exit /b 1
 
 :verify_failed
 echo [deploy-release] FAILED: %RELEASE_VERSION% started but did not verify.
+rem The host recorded this release as `deployed` — its container came up. It did
+rem not pass the agent's own checks, so it is corrected to `failed` here, BEFORE
+rem the rollback runs: a ledger that still called it `deployed` would be a record
+rem claiming a release came up when the rollback is about to replace it.
+call :record_ledger "failed" "did not verify from the agent"
 echo [deploy-release] Rolling back to %PREVIOUS_VERSION%...
 call :rollback
 endlocal
@@ -212,10 +237,15 @@ rem ---------------------------------------------------------------------------
 rem Roll back to the version the host was running before this deployment.
 rem
 rem The rollback is the SAME operation as the deployment, pointed at the previous
-rem version — one code path, so the thing exercised on the happy path is the thing
-rem that runs when it matters. If there was no previous version (a first
-rem deployment), there is nothing to return to and the script says so rather than
-rem pretending to have undone anything.
+rem version — and, from here, it is literally the same script: rollback-release.cmd
+rem is invoked with the target already chosen, does the restore, waits for health,
+rem runs the smoke test, and writes its own report. The automatic failure path and
+rem an operator restoring service by hand therefore exercise one code path, which
+rem is the only way the path that matters can be the path that is tested.
+rem
+rem If there was no previous version (a first deployment), there is nothing to
+rem return to and the script says so rather than pretending to have undone
+rem anything.
 rem ---------------------------------------------------------------------------
 :rollback
 if not defined PREVIOUS_VERSION (
@@ -231,7 +261,8 @@ if /i "%PREVIOUS_VERSION%"=="%RELEASE_VERSION%" (
     exit /b 0
 )
 
-ssh %SSH_OPTS% %DEPLOY_HOST% "sh %DEPLOY_PATH%/deploy-on-host.sh deploy %PREVIOUS_VERSION% %DEPLOY_ENV%"
+set "ROLLBACK_VERSION=%PREVIOUS_VERSION%"
+call "%~dp0rollback-release.cmd"
 if errorlevel 1 (
     echo [deploy-release] FAILED: the rollback to %PREVIOUS_VERSION% also failed. This deployment needs a human.
     call :write_report "FAILED, ROLLBACK TO %PREVIOUS_VERSION% ALSO FAILED"

@@ -1,0 +1,24 @@
+#!/bin/sh
+# A stub of the `mysql` client, for the release/rollback demo.
+#
+# Answers exactly one query — the Flyway schema history lookup host-common.sh's
+# schema_version() makes — because that is the only one the deployment tooling asks
+# and a release RECORDS the schema version without ever acting on it (ADR-003).
+#
+# The value is fixed, which is the honest simplification: the demo cannot move a
+# real schema, because nothing in this repository reverses one. What the demo does
+# prove is that the version is read and written into the release metadata, so that
+# an operator has the fact in front of them when deciding whether a rollback is
+# safe. The rule itself is a release-planning constraint, not a script — see
+# docs/operations/rollback.md §2.
+
+set -eu
+
+case "$*" in
+    *flyway_schema_history*)
+        echo "3"
+        ;;
+    *)
+        printf ''
+        ;;
+esac

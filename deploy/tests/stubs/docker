@@ -1,0 +1,166 @@
+#!/bin/sh
+# ===========================================================================
+# A stub of the `docker` CLI, for the release/rollback demo.
+#
+# This is NOT Docker. It implements exactly the subcommands the host-side
+# deployment scripts use, and nothing else, so that a demo can drive the REAL
+# deploy-on-host.sh, pre-release.sh, backup.sh, release-ledger.sh and
+# rollback-on-host.sh without a Docker daemon, a registry, or a deployment host.
+#
+# The point is what is NOT stubbed: the scripts under test are the ones in
+# deploy/, unmodified. Only the daemon is replaced. A demo that re-implemented
+# the release sequence would prove nothing about the release sequence.
+#
+# Everything it is asked to do is appended to $STUB_STATE_DIR/calls, in order, so
+# the harness can assert what the release actually did rather than trusting its
+# narration.
+#
+# Environment
+#   STUB_STATE_DIR            REQUIRED. Where to write calls + the running version.
+#   STUB_BIN_DIR              REQUIRED. Directory holding the mysql/mysqldump stubs.
+#   SIMULATE_FAILURE_VERSION  OPTIONAL. A version whose `compose up --wait` fails,
+#                             standing in for an image that starts and never
+#                             becomes healthy.
+# ===========================================================================
+
+set -eu
+
+: "${STUB_STATE_DIR:?the demo must set STUB_STATE_DIR}"
+: "${STUB_BIN_DIR:?the demo must set STUB_BIN_DIR}"
+
+log_call() {
+    printf '%s\n' "$*" >>"$STUB_STATE_DIR/calls"
+}
+
+# The version compose would resolve from the .env in the working directory —
+# which is what Docker Compose itself does, and which is why this stub reads it
+# the same way rather than being told.
+configured_tag() {
+    [ -f .env ] || return 0
+    sed -n 's/^APP_IMAGE_TAG=\(.*\)$/\1/p' .env | head -n 1
+}
+
+command_name="${1:-}"
+shift || true
+log_call "docker $command_name $*"
+
+case "$command_name" in
+    compose)
+        # Drop the `-f <file>` the scripts always pass.
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -f)
+                    shift 2
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
+
+        subcommand="${1:-}"
+        shift || true
+
+        case "$subcommand" in
+            ps)
+                # compose ps -q <service>
+                if [ "${1:-}" = "-q" ]; then shift; fi
+                printf 'stub-container-%s\n' "${1:-app}"
+                ;;
+
+            exec)
+                # compose exec -T <service> sh -c <script>
+                if [ "${1:-}" = "-T" ]; then shift; fi
+                shift || true # the service name; the script does not use it
+                if [ "${1:-}" != "sh" ] || [ "${2:-}" != "-c" ] || [ -z "${3:-}" ]; then
+                    echo "[stub docker] unsupported exec form: $*" >&2
+                    exit 2
+                fi
+                # The inner script is REAL shell — this is the one place the stub
+                # is not simulating anything. backup.sh's mysqldump and
+                # host-common.sh's schema_version run here, with mysql and
+                # mysqldump replaced by stubs on PATH, exactly as they would run
+                # inside the container.
+                MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-stub-root-password}" \
+                    MYSQL_DATABASE="${MYSQL_DATABASE:-assignment_portal}" \
+                    PATH="$STUB_BIN_DIR:$PATH" \
+                    sh -c "$3"
+                ;;
+
+            pull)
+                echo "[stub docker] pulled ${1:-app}" >&2
+                ;;
+
+            up)
+                # compose up -d --no-build --remove-orphans --wait <service>
+                tag="$(configured_tag)"
+                if [ -n "${SIMULATE_FAILURE_VERSION:-}" ] && [ "$tag" = "$SIMULATE_FAILURE_VERSION" ]; then
+                    echo "[stub docker] container for $tag started and never became healthy" >&2
+                    echo "[stub docker] exiting 1, as compose --wait would" >&2
+                    exit 1
+                fi
+                printf '%s' "$tag" >"$STUB_STATE_DIR/running-version"
+                echo "[stub docker] container is running $tag and reports healthy" >&2
+                ;;
+
+            *)
+                echo "[stub docker] unsupported: compose $subcommand" >&2
+                exit 2
+                ;;
+        esac
+        ;;
+
+    volume)
+        # `volume inspect <name>` — every required volume is present, so the
+        # pre-release gate's "a volume has vanished" branch is not the one the
+        # demo exercises. It is exercised by running pre-release.sh by hand.
+        exit 0
+        ;;
+
+    inspect)
+        # `inspect -f '{{.State.Running}}' <container>`
+        echo "true"
+        ;;
+
+    image)
+        # `image inspect --format ... <reference>`
+        echo "sha256:stub0000000000000000000000000000000000000000000000000000000000000000"
+        ;;
+
+    run)
+        # `run --rm -v <volume>:/data:ro <reference> tar ...` — the uploads
+        # archive. The command after the image reference is passed through and
+        # executed as it was given, which is the honest thing to do: the tar is
+        # real. The demonstration does not exercise this path (it backs up MySQL,
+        # not the uploads volume), so the `-C /data` it receives is a directory
+        # that only exists inside a container. Wiring a stand-in volume directory
+        # in here would be dressing up a path nothing runs.
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --rm)
+                    shift
+                    ;;
+                -v)
+                    shift 2
+                    ;;
+                -i)
+                    shift
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
+        shift || true # the image reference
+        [ -n "${1:-}" ] || {
+            echo "[stub docker] run needs a command" >&2
+            exit 2
+        }
+        exec "$@"
+        ;;
+
+    *)
+        echo "[stub docker] unsupported command: $command_name" >&2
+        exit 2
+        ;;
+esac

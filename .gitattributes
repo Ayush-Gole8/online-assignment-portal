@@ -37,6 +37,12 @@ Dockerfile*      text eol=lf
 *.yaml           text eol=lf
 Jenkinsfile      text eol=lf
 
+# The stub commands the release/rollback demonstration puts on PATH carry no
+# extension — they must be named `docker`, `mysql` and `mysqldump` to be found —
+# so they need their line endings pinned by path rather than by type. A CRLF in
+# one of them makes the shebang unresolvable in the shell that runs them.
+deploy/tests/stubs/*  text eol=lf
+
 # ---------------------------------------------------------------------------
 # Diff / language statistics hints.
 # ---------------------------------------------------------------------------

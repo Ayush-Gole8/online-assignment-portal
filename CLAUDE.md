@@ -410,6 +410,15 @@ it — which is also the first milestone whose tests exercise a state transition
 - `docs/operations/docker-cd.md` — the release process: the ref → action rules, the credentials, the
   agent and host prerequisites, the host `.env` contract, the version-identification mechanism, the
   smoke test, and the rollback. Its §8 is a claim-by-claim list of what has not been run.
+- `docs/operations/release-runbook.md` — **how to run a release**: the release model, the pre-release
+  checklist, the eleven-step procedure, the release ledger and the release context file, health and
+  smoke verification, the backward-compatibility rule, and a failure-classification table that tells
+  an application failure from a database, storage, deployment or test failure.
+- `docs/operations/rollback.md` — **how to go back**: the safety rule in full, the target-selection
+  rules, the operational command, the four outcomes, and what to do when a rollback cannot work.
+- `docs/operations/backup-restore.md` — **what is protected and how to recover it**: the row/bytes
+  asymmetry, the automatic pre-release dump, the operator commands, the restore gate, and the gaps
+  (no retention, no off-host copy, no rehearsed restore).
 - `deploy/compose.prod.yaml` — the **deployment** composition, distinct from `compose.yaml`: it
   references a published image by tag and declares no `build:`, so a host runs the tested artefact or
   fails. The database is not published on a host port and no `APP_SEED_*` variable is passed, so a
@@ -418,13 +427,30 @@ it — which is also the first milestone whose tests exercise a state transition
   because `.gitignore`'s `.env.*` would otherwise ignore it. It draws the ownership line: the
   database credentials and `IMAGE_REPOSITORY` are the **host's**, and the pipeline rewrites exactly
   two non-secret keys (`APP_IMAGE_TAG`, `APP_ENVIRONMENT`).
-- `deploy/deploy-on-host.sh` — the host-side half of a release, run over SSH. It records the version
-  currently running *before* changing anything, rewrites those two keys, pulls the exact tag, and
-  replaces the container with `--no-build --remove-orphans --wait`.
+- `deploy/` — the **host-side** half of a release, run over SSH. `host-common.sh` is the shared
+  library every other script in this directory sources (the `.env` reader, the in-place key
+  rewriter, the version/environment validators, the Docker and `flyway_schema_history` helpers);
+  `deploy-on-host.sh` performs a deployment; `pre-release.sh` is the gate that runs before the swap
+  — volumes verified, a MySQL dump taken, `releases/<version>.env` written — and refuses when a host
+  that has released before has lost a volume or cannot be backed up; `release-ledger.sh` maintains
+  `releases/ledger.tsv`, the append-only record of each attempt's outcome; `backup.sh` takes,
+  lists and restores the two halves of a submission (the row and the bytes); `rollback-on-host.sh`
+  chooses the last version a **`success`** row marks stable and restores it.
 - `scripts/ops/` — `env.cmd` (shared defaults, credential **IDs** only), `release-version.cmd` (the
   tag is the version), `docker-login.cmd` (token over stdin, never an argument), `publish-image.cmd`
-  (refuses `latest`), `deploy-release.cmd` (the deployment and its rollback), `smoke-test.ps1` /
-  `smoke-test.cmd`.
+  (refuses `latest`), `copy-host-scripts.cmd` (the one list of files a host must hold),
+  `deploy-release.cmd` (the deployment, and the rollback on its failure path), `rollback-release.cmd`
+  (the operational rollback — the same command the failure path calls, so the automatic path and the
+  hand-run one are one code path), `backup-restore.cmd` (the operator's backup/restore view of
+  `deploy/backup.sh`), `smoke-test.ps1` / `smoke-test.cmd`.
+- `deploy/tests/` — `release-rollback-demo.sh`, a runnable demonstration, **written and never run**,
+  that drives the real host scripts through the release model under a stubbed Docker daemon
+  (`deploy/tests/stubs/docker`, plus `mysql` and `mysqldump`) and a stub application
+  (`stub-application-server.ps1`), and verifies each release with the pipeline's own
+  `wait-for-health.cmd` and `smoke-test.cmd`. The simulated failure is a version that answers
+  `/actuator/health` with `UP` and serves `/submissions` unguarded — a deployment that is up,
+  healthy and wrong. That it is intended to prove the mechanism is not evidence that it has; it has
+  produced no transcript.
 - `ansible/` — the **provisioning** half, written on 2026-10-08 and unrun. `site.yml` and three
   roles: `common` (generic host prerequisites — base packages, time sync — and nothing that knows
   the portal exists), `docker` (Docker Engine, the Compose v2 plugin, the Python SDK, and the two
@@ -493,17 +519,28 @@ exercises each constraint by inserting rows the service would never produce.
   different concern from *security* events.
 - **No resubmission.** A rejection is terminal in the MVP. Rejected work is not resubmitted, and
   nothing resets a submission to `SUBMITTED`.
-- **No TLS, no firewall, no backup story, and no deployment that has ever run.** The *delivery* half
+- **No TLS, no firewall, and no backup that has ever been restored.** The *delivery* half
   of the pipeline is written — a versioned image published to Docker Hub, `ssh`/`scp` to a host,
   `docker compose pull` + `up --no-build --wait`, a health check from the agent, a smoke test that
-  asserts the running version, a rollback to the previous version — and, added 2026-10-08, the
+  asserts the running version, a rollback to the previous version, and an append-only release ledger
+  that names what the previous good version **was** — and, added 2026-10-08, the
   *provisioning* half: the `ansible/` tree turns a bare host into one running the stack as a managed
-  systemd service. What is still absent is everything around that: no TLS terminator (so
-  `SESSION_COOKIE_SECURE` is `false`), no firewall rule deciding who can reach the application port,
-  and no backup or restore for either volume. Every one of these mechanisms is **written, not run**,
-  and CLAUDE.md §13's precondition for the delivery work — a green `clean verify` — is still unmet,
-  so nothing here has been exercised. The image is **written, not built**;
-  `docs/operations/docker.md` §8, `docker-cd.md` §8 and `ansible.md` §9 list what has not been run.
+  systemd service. Added 2026-10-10, the **release and recovery** half: `deploy/pre-release.sh`'s
+  gate (volumes, a MySQL dump, the release's metadata), `deploy/backup.sh` for both halves of a
+  submission, and `deploy/rollback-on-host.sh` + `scripts/ops/rollback-release.cmd` for the way back
+  — documented in [`release-runbook.md`](docs/operations/release-runbook.md),
+  [`rollback.md`](docs/operations/rollback.md) and
+  [`backup-restore.md`](docs/operations/backup-restore.md). What is still absent is everything
+  around that: no TLS terminator (so `SESSION_COOKIE_SECURE` is `false`), no firewall rule deciding
+  who can reach the application port, no backup **retention**, no off-host copy, and — the largest
+  gap — no restore that has ever been rehearsed, so the backups are hypotheses. Every one of these
+  mechanisms is **written, not run**. `deploy/tests/release-rollback-demo.sh` was written to execute
+  the release/rollback scripts against a stubbed Docker daemon and a stub application; **it has
+  itself never run**, so the release and rollback scripts stand exactly where the rest do. CLAUDE.md
+  §13's precondition for the delivery work — a green `clean verify` — is still unmet. The image is
+  **written, not built**; `docs/operations/docker.md` §8, `docker-cd.md` §8,
+  `release-runbook.md` §9, `rollback.md` §9, `backup-restore.md` §6 and `ansible.md` §9 list what
+  has not been run, claim by claim.
 - **No admin UI.** `ADMIN` exists as a role, gates `/admin/**`, and can review; no management
   screens ship.
 
@@ -595,14 +632,31 @@ be. The pipeline carries three quarters of the delivery path:
   Hub under it, and a host runs that exact version or the previous one is restored. `deploy/`,
   `scripts/ops/` and [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md) are the
   artefacts;
+- **release control and recovery** (added 2026-10-10) — the pre-release gate
+  (`deploy/pre-release.sh`: volumes verified, a MySQL dump taken, `releases/<version>.env` written),
+  the append-only **release ledger** (`deploy/release-ledger.sh` → `releases/ledger.tsv`) that
+  answers "what was the last version that actually worked" when `.env` cannot, backups for both
+  halves of a submission (`deploy/backup.sh`), and an operational rollback
+  (`deploy/rollback-on-host.sh` + `scripts/ops/rollback-release.cmd`) that restores the last
+  **stable** version, waits for health from the agent, runs the smoke test and records the outcome.
+  The failure path of `deploy-release.cmd` calls the operational rollback rather than performing its
+  own redeploy, so the automatic path and the hand-run one are one code path. Documented in
+  [`release-runbook.md`](docs/operations/release-runbook.md),
+  [`rollback.md`](docs/operations/rollback.md) and
+  [`backup-restore.md`](docs/operations/backup-restore.md). `deploy/tests/release-rollback-demo.sh`
+  was written to exercise this half against a stubbed Docker daemon and a stub application, with the
+  pipeline's own `wait-for-health.cmd` and `smoke-test.cmd` doing the verification — but it has
+  **never been run**, so this half has no executed evidence either;
 - **provisioning** (added 2026-10-08) — the `ansible/` tree: three roles that take a bare host to one
   running the stack as `assignment-portal.service`, with the same `/opt/assignment-portal` contract
   the release path uses, and a systemd unit that makes `systemctl status` and `systemctl restart` the
   operational verbs ([`docs/operations/ansible.md`](docs/operations/ansible.md)).
 
-What Milestone 5 still carries: **TLS**, **a firewall**, and a **backup/restore story for the
-volumes** — the three things [`ansible.md` §10](docs/operations/ansible.md) names as gaps; and — if
-it is to be claimed — the FR-24 audit trail carried over above.
+What Milestone 5 still carries: **TLS** and **a firewall** — two of the three things
+[`ansible.md` §10](docs/operations/ansible.md) names as gaps; the third, a backup/restore story, is
+now written and its remaining holes (no retention, no off-host copy, no rehearsed restore) are named
+in [`backup-restore.md` §6–7](docs/operations/backup-restore.md); and — if it is to be claimed — the
+FR-24 audit trail carried over above.
 
 **Nothing in Milestone 5 should be trusted before the Milestone 4 build is green**, and that
 precondition is still unmet. Every Milestone 5 artefact was added ahead of it on the repository
