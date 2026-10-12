@@ -1,470 +1,438 @@
-# Git-Driven Online Assignment Submission Portal
+# Online Assignment Portal
 
-A small, production-style **modular monolith** for submitting and reviewing coursework
-assignments, wrapped in a full **DevOps delivery pipeline** that runs from a GitHub pull
-request through Jenkins, Maven, automated tests, Docker, Ansible provisioning, deployment,
-health checking, and rollback.
-
-The application is deliberately modest. The engineering objective of this repository is the
-**delivery pipeline and the discipline around it**, not feature volume.
-
-> **Status: Milestone 4 — the reviewer workflow is implemented.** Session sign-in with the three
-> roles, PDF upload with server-side validation, SHA-256 checksums, file storage on a volume, and a
-> student's own submission list and detail page all exist. Milestone 4 added the reviewer side: a
-> queue of work awaiting a decision, a single terminal **approve/reject** decision with a mandatory
-> rejection reason, an **append-only status history** written in the same transaction as every
-> transition, **optimistic locking** so two reviewers cannot silently overwrite one another, and
-> **file download** for both the owner and the reviewer.
->
-> **The integration suite now executes — and the three real defects it found are fixed and
-> unverified.** Three runs on 2026-10-02, each informative. The first had **no Docker daemon**: all
-> 112 integration tests aborted at class initialisation, so nothing in Milestones 3 or 4 was
-> reached. The second ran with Docker up: **60 unit tests green, 112 integration tests executed, 2
-> failures, 0 errors.** Both were genuine defects — a Thymeleaf fragment-parameter collision that
-> stopped a refused upload being handed back to the student, and a test that drove Spring Boot's
-> error controller through its JSON handler and then asserted on an HTML view that was never
-> resolved. The third ran the suite again — **113 tests, 1 failure** — and that failure was a third
-> defect: the templates were shipping their own engineering comments to the browser, including the
-> error page's notes naming `BasicErrorController` and `SecurityConfiguration`. **The last fully
-> green build is still Milestone 2's.**
->
-> **Not yet present — deliberately:** the audit trail (FR-24), any form of resubmission, and an
-> admin UI beyond the role gate. The delivery path is now written end to end: continuous
-> integration — a [`Jenkinsfile`](Jenkinsfile), the unit/integration/browser suites, and a
-> [`Dockerfile`](Dockerfile) that packages the JAR into a production image; release — a `vX.Y.Z`
-> git tag is the version, the image is published to Docker Hub under it
-> ([`deploy/`](deploy), [`scripts/ops/`](scripts/ops),
-> [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)); provisioning — an
-> [`ansible/`](ansible) tree that takes a bare host to one running the stack as a managed systemd
-> service ([`docs/operations/ansible.md`](docs/operations/ansible.md)); and release control and
-> recovery — the pre-release gate, the append-only release ledger, backups for both halves of a
-> submission, and an operational rollback
-> ([`docs/operations/release-runbook.md`](docs/operations/release-runbook.md),
-> [`rollback.md`](docs/operations/rollback.md),
-> [`backup-restore.md`](docs/operations/backup-restore.md)). **Nothing in any of it has run to
-> green: the image has never been built, no image has been pushed, no host has been contacted, no
-> rollback has fired, no playbook has been executed, no backup has been taken and no restore has
-> been performed.** What is still genuinely absent is TLS, a firewall, and a restore that has ever
-> been rehearsed.
->
-> See [Unverified claims](#unverified-claims) before relying on any statement below.
->
-> See [Current project status](CLAUDE.md#11-current-project-status) and
-> [Next milestone readiness](#next-milestone-readiness).
+A **Git-Driven Online Assignment Submission Portal** built as a Computer Engineering capstone
+project. Students submit coursework as PDF files; reviewers approve or reject them. The
+application is intentionally modest -- the **real deliverable is the delivery pipeline**: a change
+travels from a GitHub pull request, through Jenkins, Maven tests, a Docker image, a registry,
+Ansible provisioning, deployment, health-check, and a rollback path, repeatably and with evidence.
 
 ---
 
-## What the application does
+## Table of Contents
 
-The MVP implements exactly two workflows over a single artefact type:
+1. [What the project is](#1-what-the-project-is)
+2. [Why it exists](#2-why-it-exists)
+3. [Architecture](#3-architecture)
+4. [How to run locally](#4-how-to-run-locally)
+5. [How to run tests](#5-how-to-run-tests)
+6. [How to build the Docker image](#6-how-to-build-the-docker-image)
+7. [How deployment works](#7-how-deployment-works)
+8. [How Ansible works](#8-how-ansible-works)
+9. [How rollback works](#9-how-rollback-works)
+10. [Where configuration comes from](#10-where-configuration-comes-from)
+11. [What is intentionally out of scope](#11-what-is-intentionally-out-of-scope)
+12. [Repository map](#12-repository-map)
+
+---
+
+## 1. What the project is
+
+A server-rendered web application where:
+
+- A **STUDENT** signs in, uploads a PDF assignment (10 MB maximum), and tracks its status.
+- A **REVIEWER** opens the submission queue, reads the PDF, and records one terminal decision --
+  `APPROVED` or `REJECTED` -- with a mandatory comment.
+- Every status transition is recorded in an append-only history table.
+- An **ADMIN** role exists for user management (no admin UI ships in the MVP).
+
+The application is a **modular monolith**: one deployable JAR, one database, no microservices.
+Complexity is a cost: the simpler the application, the more of the project budget goes to the
+pipeline.
+
+**Functional requirements:** [`docs/requirements/mvp.md`](docs/requirements/mvp.md)
+
+---
+
+## 2. Why it exists
+
+The project demonstrates a complete, production-style delivery pipeline for a Computer Engineering
+capstone. The criterion for success is not feature count -- it is the ability to:
+
+1. Take a code change from a pull request to a deployed, verified release.
+2. Detect a bad deployment automatically and roll it back.
+3. Provision a bare host reproducibly with Ansible.
+4. Prove the above with captured evidence, not assertion.
+
+The application is the vehicle. The pipeline is the point.
+
+---
+
+## 3. Architecture
+
+### Runtime shape
 
 ```
-STUDENT uploads a PDF  ──▶  SUBMITTED  ──▶  REVIEWER approves  ──▶  APPROVED
-                                            └▶ REVIEWER rejects  ──▶  REJECTED (final)
+Browser  --HTTPS-->  Spring Boot (embedded Tomcat, port 8080)
+                         |
+                         +-- Spring Security (session auth, CSRF, role checks)
+                         +-- Spring MVC + Thymeleaf (server-rendered pages)
+                         +-- Feature packages: auth / submission / review
+                         +-- Shared capabilities: storage / config
+                         +-- Spring Data JPA --JDBC-->  MySQL 8.4
+                                                           |
+                         StorageService --file I/O-->  Persistent volume (PDF bytes)
 ```
 
-- **STUDENT** — submits one PDF per assignment; sees the status, the reviewer's decision and reason,
-  and the chronological history of their own submissions, and can download their own file.
-- **REVIEWER** — works a queue of submissions awaiting a decision, reads the artefact, and records
-  one terminal approve/reject decision; a rejection requires a reason.
-- **ADMIN** — reaches the same reviewer screens as a `REVIEWER`. User management and the audit trail
-  are **not implemented**; `/admin/**` is gated but has no controller behind it.
+### Package structure (feature-first, not layer-first)
 
-A decision is **final**: a decided submission cannot be decided again, and rejected work is never
-resubmitted. Resubmission is explicitly **out of scope** for the MVP.
+```
+com.vit.assignmentportal
++-- auth/           - User entity, DatabaseUserDetailsService, CurrentUserService
++-- submission/     - Submission entity, SubmissionService, SubmissionController
+|                     SubmissionStatusHistory (append-only, one row per transition)
++-- review/         - ReviewService, ReviewController, ReviewDecision
++-- storage/        - StorageService, StorageIdentifier, ChecksumService,
+|                     FileValidationService
++-- config/         - SecurityConfiguration, StorageProperties
++-- common/         - shared value types, domain exceptions
+```
 
-Every status change appends a row to `submission_status_history` in the same transaction as the
-change itself, so the history cannot disagree with the submission it describes. The student reading
-their own history sees what happened and when, but not who decided it.
+Dependency direction: features depend on capabilities depend on common. A feature never imports
+another feature's repository or entity directly.
 
-### Routes
+### Delivery pipeline
 
-| Method & path | Who | What it does |
-| --- | --- | --- |
-| `GET /` | any signed-in user | Home page, with links to the actions the role may take |
-| `GET /login`, `POST /login` | anonymous | Form sign-in |
-| `POST /logout` | signed-in | Sign out, invalidating the session server-side |
-| `GET /student/dashboard` | `STUDENT` | Own counts by status, and the most recent few |
-| `GET /submissions` | `STUDENT` | The signed-in student's own submissions, newest first, paged |
-| `GET /submissions/new`, `POST /submissions` | `STUDENT` | Upload one PDF |
-| `GET /submissions/{id}` | `STUDENT` | One own submission: status, decision, reason, history |
-| `GET /submissions/{id}/file` | `STUDENT` | Download one's own file, as an attachment |
-| `GET /review`, `GET /review/queue` | `REVIEWER`, `ADMIN` | Queue of submissions awaiting a decision, oldest first, paged |
-| `GET /review/submissions/{id}` | `REVIEWER`, `ADMIN` | One submission, with its history and the decision form |
-| `POST /review/submissions/{id}` | `REVIEWER`, `ADMIN` | Record one terminal decision |
-| `GET /review/submissions/{id}/file` | `REVIEWER`, `ADMIN` | Download the artefact |
-| `GET /access-denied` | signed-in | Shown when an authenticated user lacks the role a route requires |
-| `GET /error` | anonymous | The page every unhandled failure renders as — status only |
-| `GET /actuator/health` | anonymous | Liveness — status only, no details |
-| `GET /actuator/info` | anonymous | Build identity — the release version baked into the image, and the environment it is running in. Two identifiers and nothing else |
+```
+GitHub PR  --review-->  Jenkins CI
+                          +-- Build (compile both source sets)
+                          +-- Unit Tests (JUnit 5, Surefire, no Spring context)
+                          +-- Integration Tests (Failsafe + Testcontainers MySQL 8.4)
+                          +-- Package (Spring Boot executable JAR)
+                          +-- Start Test Environment (db + JAR + health wait)
+                          +-- Selenium E2E (real browser, real deployment)
+                          +-- Docker Build (multi-stage image, tagged by commit/version)
+                          +-- Publish Image (Docker Hub, vX.Y.Z tag only)
+                          +-- Deploy (SSH to host, compose up, health check, rollback on failure)
+```
 
-Authorisation is a route rule in the security filter chain, not a check inside a handler. A student
-reaching another student's submission gets **404**, not **403** — "not yours" and "not there" are
-deliberately the same answer, so the endpoint cannot be used to discover which identifiers exist.
-Uploaded files are always served as attachments with a fixed content type, never rendered inline.
-`/submissions/**` and `/student/**` are `STUDENT` only; `/review/**` is `REVIEWER` or `ADMIN`; a
-signed-in user refused a route is shown `/access-denied` with a 403, rather than being sent round a
-sign-in loop that cannot grant the missing role.
+**Detailed documents:**
 
-### Pages
-
-Server-rendered Thymeleaf, Bootstrap-based and responsive, with **no JavaScript** — every flow
-completes with scripting disabled. The pages share four fragments (`layout`, `navbar`, `flash`,
-`footer`) plus `validation`, `status`, and `pagination`, so the navigation and the sign-out form are
-written once. Forms carry accessible labels and are keyboard-operable; server-side validation is the
-control, and a browser's own checks are a convenience layered over it. See
-[`docs/evidence/ui-screenshots.md`](docs/evidence/ui-screenshots.md) for the screenshots that must be
-captured to evidence the UI.
-
-## Technology stack
-
-| Layer | Choice |
+| Concern | Document |
 | --- | --- |
-| Language | Java 21 |
-| Framework | Spring Boot 4.1.1 (Spring MVC, server-rendered) |
-| View | Thymeleaf |
-| Security | Spring Security, session-based, CSRF enabled |
-| Persistence | Spring Data JPA over MySQL 8.4 |
-| Migrations | Flyway |
-| Build | Maven |
-| Unit / integration tests | JUnit 5, Testcontainers |
-| End-to-end tests | Selenium 4 |
-| Packaging | Docker image containing a Spring Boot executable JAR |
-| Local & deploy composition | Docker Compose |
-| CI | Jenkins |
-| Provisioning | Ansible |
+| System context and request lifecycle | [`docs/architecture/system-overview.md`](docs/architecture/system-overview.md) |
+| Package layout and dependency rules | [`docs/architecture/application-structure.md`](docs/architecture/application-structure.md) |
+| End-to-end request flow | [`docs/architecture/end-to-end-flow.md`](docs/architecture/end-to-end-flow.md) |
+| Data model | [`docs/architecture/data-model.md`](docs/architecture/data-model.md) |
+| Security model | [`docs/architecture/security.md`](docs/architecture/security.md) |
+| Architecture Decision Records | [`docs/adr/`](docs/adr/) |
 
-Planned versions and the procedure for recording actual local versions are tracked in
-[`docs/operations/toolchain.md`](docs/operations/toolchain.md).
+---
 
-## Architecture at a glance
+## 4. How to run locally
 
-```mermaid
-flowchart LR
-    Browser["Browser<br/>(STUDENT / REVIEWER / ADMIN)"]
-    App["Spring Boot modular monolith<br/>Thymeleaf · Spring MVC · Spring Security<br/>embedded Tomcat · executable JAR"]
-    DB[("MySQL 8.4<br/>system of record")]
-    Files[("Persistent volume<br/>PDF artefacts")]
+### Prerequisites
 
-    Browser -->|HTTPS, session cookie| App
-    App -->|JDBC / JPA| DB
-    App -->|read-write| Files
+| Tool | Version | Notes |
+| --- | --- | --- |
+| JDK | 21 (exactly) | Set `JAVA_HOME`; Maven Wrapper enforces the version |
+| Docker Desktop | current | Required for integration tests and full stack |
+| Git | any | For checkout |
+
+The Maven Wrapper (`mvnw` / `mvnw.cmd`) is the **canonical build tool**. It pins Maven 3.9.16.
+Do not use a system Maven -- the wrapper is what CI uses, and divergence from CI is the failure.
+
+### Steps
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/<org>/online-assignment-portal.git
+cd online-assignment-portal
+
+# 2. Copy and populate the environment file
+cp .env.example .env
+# Edit .env: set DB_PASSWORD, DB_ROOT_PASSWORD, APP_SEED_STUDENT_PASSWORD,
+#            APP_SEED_REVIEWER_PASSWORD (STORAGE_ROOT defaults are usable for dev)
+
+# 3. Start the database
+docker compose up -d db
+
+# 4. Run the application (reads .env automatically)
+./mvnw spring-boot:run          # Linux / macOS / Git Bash
+.\mvnw.cmd spring-boot:run      # Windows PowerShell / cmd.exe
+
+# 5. Open http://localhost:8080
+#    Demo accounts (APP_SEED_ENABLED=true is the default for the dev profile):
+#      student  / <APP_SEED_STUDENT_PASSWORD>
+#      reviewer / <APP_SEED_REVIEWER_PASSWORD>
 ```
 
-A modular monolith — not microservices — with package-by-feature organisation, a single
-deployable unit, and one relational system of record. Full diagrams and rationale:
-[`docs/architecture/system-overview.md`](docs/architecture/system-overview.md).
+To run the full stack as Docker containers (application + database, no local Java needed):
 
-## Delivery pipeline
-
+```bash
+./mvnw clean package -DskipTests
+docker compose up -d --build
+# Application: http://localhost:8080
+# Logs:        docker compose logs -f app
+# Stop:        docker compose down        (preserves database and uploads)
+# Destroy:     docker compose down -v     (deletes database and uploads)
 ```
-GitHub → Pull Request / Review → Jenkins CI → Maven Build → Unit Tests
-       → Integration Tests → Selenium E2E → Docker Image → Docker Registry
-       → Ansible Provisioning → Deployment → Health Check → Rollback
+
+---
+
+## 5. How to run tests
+
+The test suite is partitioned into three layers. The Maven Wrapper commands are canonical:
+
+```bash
+# Full verification -- compile, unit tests, integration tests (requires Docker)
+./mvnw clean verify
+.\mvnw.cmd clean verify          # Windows
+
+# Unit tests only (fast, no Docker needed)
+./mvnw test
+
+# Integration tests only (requires Docker daemon)
+./mvnw failsafe:integration-test failsafe:verify
+
+# Selenium E2E (requires a running application -- start it first)
+./mvnw verify -Pe2e
+
+# Single test class, integration example
+.\mvnw.cmd -B -Dit.test=ReviewWorkflowIT verify
 ```
 
-Each stage is documented, and every stage that produces evidence stores it under
-[`docs/evidence/`](docs/evidence/). The continuous-integration half — checkout through packaging,
-the unit, integration and Selenium suites, and the quality gate that stops a failed revision before
-it can be released — is committed as [`Jenkinsfile`](Jenkinsfile) and described in
-[`docs/operations/jenkins-ci.md`](docs/operations/jenkins-ci.md) and
-[`docs/testing/ci-quality-gates.md`](docs/testing/ci-quality-gates.md).
+| Layer | Mechanism | Tag | Speed |
+| --- | --- | --- | --- |
+| Unit | Surefire, `*Test.java` | `unit` | Milliseconds |
+| Integration | Failsafe, `*IT.java`, Testcontainers | `integration` | Seconds |
+| E2E | Failsafe, `*E2E.java`, Selenium | `e2e` | Minutes |
 
-The delivery half is committed too, and described in
-[`docs/operations/docker-cd.md`](docs/operations/docker-cd.md): **what runs is decided by the ref
-being built.** A feature branch, `develop` or `main` runs CI and stops — the image is built locally
-so a broken `Dockerfile` is caught, and it is never published. A **`vX.Y.Z` tag** runs CI and, when
-it is green, publishes `IMAGE_REPOSITORY:1.0.1` to Docker Hub and deploys that exact version to a
-host if `DEPLOY_ENV` names one. `latest` is never produced. The version is baked into the image at
-build time and published at `/actuator/info`, so the post-deployment smoke test can prove the
-release answering is the release deployed — and the previous version is restored if it cannot.
+`clean verify` never runs E2E -- it requires the `-Pe2e` profile, which requires a human or CI
+stage to start the environment first.
 
-**Nothing in the delivery half has been executed.** The release rules, the credentials, the host
-contract, and a claim-by-claim list of what has not been run are in `docker-cd.md` §2–§8.
+**Testing strategy:** [`docs/testing/strategy.md`](docs/testing/strategy.md)
 
-## Repository layout
+---
+
+## 6. How to build the Docker image
+
+The Dockerfile does **not** run Maven. It packages the JAR that `./mvnw package` already
+produced, so the tested artefact and the deployed artefact are the same bytes.
+
+```bash
+# 1. Produce the JAR
+./mvnw clean package -DskipTests
+
+# 2. Build the image (local tag)
+docker build -t online-assignment-portal:local .
+
+# 3. Build with a version baked in (as the pipeline does)
+docker build --build-arg APP_VERSION=1.0.0 -t online-assignment-portal:1.0.0 .
+
+# 4. Inspect the result
+docker image inspect online-assignment-portal:local
+```
+
+The image is a **two-stage build**:
+
+1. **Unpack stage** -- extracts the Spring Boot JAR into four layers (dependencies,
+   spring-boot-loader, snapshot-dependencies, application) so that rebuilds after a code change
+   only rewrite the `application/` layer.
+2. **Runtime stage** -- Eclipse Temurin 21 JRE, non-root user `portal` (UID/GID 1001),
+   `curl`-based HEALTHCHECK, `STOPSIGNAL SIGTERM` for graceful drain, `APP_VERSION` baked in.
+
+**Full image lifecycle:** [`docs/operations/docker.md`](docs/operations/docker.md)
+
+---
+
+## 7. How deployment works
+
+A release is triggered by pushing a `vX.Y.Z` git tag. Jenkins:
+
+1. **Identifies the version** from the tag (`scripts/ops/release-version.cmd`).
+2. **Builds and tags** the image `<repository>:<version>`.
+3. **Publishes** the image to Docker Hub (credentials from the Jenkins store, never in code).
+4. **Connects** to the deployment host over SSH (`sshagent`).
+5. **Runs the pre-release gate** -- verifies persistent volumes, takes a MySQL dump, writes a
+   release context file.
+6. **Runs `deploy-on-host.sh`** -- pulls the exact tagged image, runs `docker compose up
+   --no-build --wait`, waits for the health endpoint.
+7. **Runs the smoke test** -- verifies `/actuator/health` is UP and `/actuator/info` reports the
+   exact deployed version.
+8. **On success**, appends a `success` row to `releases/ledger.tsv`.
+9. **On failure**, triggers rollback automatically (same command as the manual rollback).
+
+Only a green build of a `vX.Y.Z` tag reaches the Publish and Deploy stages. A feature branch
+builds and tests but never publishes.
+
+**Release runbook:** [`docs/operations/release-runbook.md`](docs/operations/release-runbook.md)
+**CD pipeline detail:** [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)
+
+> **Status:** The release pipeline is written. No image has been built by this pipeline, no push
+> attempted, and no deployment host contacted. See `docker-cd.md` Section 8 for the full list of
+> unexercised claims.
+
+---
+
+## 8. How Ansible works
+
+Ansible provisions a bare Linux host and keeps it converged. Three roles run in order:
+
+| Role | Responsibility |
+| --- | --- |
+| `common` | Base packages (curl, git, jq), time sync (chrony). Generic -- knows nothing about the portal. |
+| `docker` | Docker Engine, Compose v2 plugin, Python Docker SDK, `daemon.json` (log limits, live-restore). |
+| `application` | Deploy directory (`/opt/assignment-portal`), `compose.prod.yaml`, `.env` (vault-sourced secrets), named volumes, image pull, systemd unit `assignment-portal.service`, health and version assertions. |
+
+```bash
+# Install collections (one-time on the controller)
+ansible-galaxy collection install -r ansible/requirements.yml
+
+# Dry-run preview
+ansible-playbook -i ansible/inventory/staging.ini ansible/site.yml \
+    --check --diff --ask-vault-pass
+
+# Converge the host
+ansible-playbook -i ansible/inventory/staging.ini ansible/site.yml --ask-vault-pass
+
+# Run again -- second run must report changed=0 (idempotency demonstration)
+ansible-playbook -i ansible/inventory/staging.ini ansible/site.yml --ask-vault-pass
+
+# Operate the service on the host
+systemctl status  assignment-portal
+systemctl restart assignment-portal
+```
+
+Secrets live in `ansible/group_vars/vault.yml`, encrypted with `ansible-vault`. The file is
+referenced explicitly in `site.yml` -- it is not auto-loaded.
+
+**Ansible detail:** [`docs/operations/ansible.md`](docs/operations/ansible.md)
+
+> **Status:** The Ansible tree is written. No `ansible-playbook` has been run against any host.
+> See `ansible.md` Section 9 for the full list of unexercised claims.
+
+---
+
+## 9. How rollback works
+
+A rollback points the deployment back at the last version recorded as `success` in
+`releases/ledger.tsv`. It does not undo database migrations.
+
+```bash
+# Manual rollback (operator command -- same script the pipeline calls automatically)
+scripts\ops\rollback-release.cmd
+```
+
+The host-side script (`deploy/rollback-on-host.sh`):
+
+1. Reads the ledger to find the last stable version.
+2. Rewrites `.env` with that version's `APP_IMAGE_TAG`.
+3. Runs `docker compose pull` and `docker compose up --no-build --wait`.
+4. Waits for health.
+5. Runs the smoke test.
+6. Appends an outcome row to the ledger.
+
+**Flyway/rollback compatibility rule:** Rollback is safe only when the schema change the failed
+release carried is backward compatible (additive columns with defaults, new tables). A destructive
+migration (`DROP COLUMN`, `RENAME`) forfeits the rollback path. See
+[`docs/operations/rollback.md`](docs/operations/rollback.md) Section 2 for the full compatibility
+table.
+
+> **Status:** The rollback scripts are written. No rollback has fired. See `rollback.md` Section 9
+> for the full list of unexercised claims.
+
+---
+
+## 10. Where configuration comes from
+
+Configuration is externalised. The **same JAR is promoted between environments without being
+rebuilt**; only the environment changes.
+
+| Source | Committed? | Contains |
+| --- | --- | --- |
+| `src/main/resources/application.yml` | Yes | Safe defaults -- ports, Flyway, actuator exposure, session settings |
+| `.env.example` | Yes | Variable **names** and documentation only. No values. |
+| `.env` | No (git-ignored) | Real values for local development |
+| Jenkins credentials store | No | `dockerhub-credentials`, `deploy-ssh-key` |
+| `ansible/group_vars/vault.yml` | Yes (encrypted) | DB password, app secrets for staging |
+| `deploy/env.production.example` | Yes | Template for the host `.env` |
+
+Precedence (lowest to highest): `application.yml` then environment variables.
+
+Key variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `DB_URL` | JDBC URL for MySQL |
+| `DB_USERNAME` / `DB_PASSWORD` | Database credentials |
+| `STORAGE_ROOT` | Absolute path to the PDF upload volume |
+| `APP_SEED_ENABLED` | `true` to seed demo accounts (dev profile only) |
+| `APP_SEED_STUDENT_PASSWORD` | Demo student password |
+| `APP_SEED_REVIEWER_PASSWORD` | Demo reviewer password |
+| `APP_VERSION` | Baked into the Docker image at build time |
+| `SESSION_COOKIE_SECURE` | `false` without TLS; `true` in production |
+
+A secret is never written into any committed file. `CLAUDE.md` Section 7 rule 1 is the
+authoritative statement of this rule.
+
+---
+
+## 11. What is intentionally out of scope
+
+These items are excluded deliberately, not by omission. The source of truth is
+[`docs/requirements/mvp.md`](docs/requirements/mvp.md) Section 3.
+
+| Item | Reason |
+| --- | --- |
+| Admin UI | `ADMIN` role and route guard exist; no management screens ship |
+| Security-event audit trail (FR-24) | Outstanding; `audit_events` table and `AuditService` do not exist |
+| Resubmission | A rejection is terminal in the MVP |
+| TLS termination | Out of scope; `SESSION_COOKIE_SECURE=false` until a reverse proxy is added |
+| Firewall rules | Host-level; out of scope for the application |
+| Email notifications | No email provider |
+| External identity provider | Local database accounts only |
+| Backup retention / off-host copy | Backup scripts exist; retention policy and off-host transfer do not |
+| Restore rehearsal | Backups are hypotheses until a rehearsed restore is recorded |
+| Multi-role users | A user holds exactly one role in the MVP |
+| Microservices | ADR-001 records the decision; superseding it requires a new ADR |
+
+---
+
+## 12. Repository map
 
 ```
 .
-├── CLAUDE.md                     # Engineering handbook & rules of engagement
-├── README.md                     # This file
-├── CONTRIBUTING.md               # Branch, commit, and review workflow
-├── SECURITY.md                   # Threat model, secret handling, reporting
-├── pom.xml                       # Java 21, Spring Boot 4.1.1, pinned dependencies
-├── Dockerfile                    # Multi-stage image: packages the JAR Maven built,
-│                                 #   runs it as a non-root user on a Temurin 21 JRE
-├── compose.yaml                  # The running system: the application and MySQL 8.4,
-│                                 #   two named volumes, health checks, explicit ports
-├── deploy/                       # The deployment half: compose.prod.yaml (pulls a
-│                                 #   published version, never builds), the host .env
-│                                 #   template, and the host-side release script
-├── ansible/                      # Provisioning: three roles (common, docker,
-│                                 #   application) take a bare host to one running the
-│                                 #   stack as assignment-portal.service; secrets are
-│                                 #   ansible-vault encrypted
-├── .dockerignore                 # admits one file into the build context: the JAR
-├── mvnw / mvnw.cmd               # Maven Wrapper — the canonical build mechanism
-│                                 #   pins Maven 3.9.16; no local Maven needed
-├── .editorconfig / .gitattributes / .gitignore / .env.example / cspell.json
-├── .github/                      # Issue templates and PR template
-├── src/
-│   ├── main/java/com/vit/assignmentportal/
-│   │   ├── AssignmentPortalApplication.java
-│   │   ├── auth/                 # identity: sign-in, roles, the User entity
-│   │   ├── submission/           # the student's slice, the status transition, the history
-│   │   ├── review/               # the reviewer's slice: queue, decision policy, reviewer pages
-│   │   ├── storage/              # file bytes on a volume: validate, store, load, checksum
-│   │   ├── config/               # the security filter chain and route rules
-│   │   └── common/               # shared kernel — value types and enums only
-│   ├── main/resources/
-│   │   ├── application.yml       # Externalised configuration — no secrets
-│   │   ├── db/migration/         # Flyway: V1 users, V2 submissions, V3 status history
-│   │   ├── templates/            # Thymeleaf views, one directory per feature
-│   │   └── static/               # CSS and assets
-│   └── test/java/com/vit/assignmentportal/
-│       ├── MySqlIntegrationTest.java      # the shared Testcontainers base class
-│       ├── ApplicationContextIT.java      # migrations and every schema constraint
-│       ├── auth/                 # encoder unit test + authentication/authorization ITs
-│       ├── storage/              # unit tests: validation, checksums, paths, I/O
-│       ├── submission/           # upload, access-isolation, failure-handling,
-│       │                         #   and the two-reviewer concurrency IT
-│       ├── review/               # reviewer workflow IT + decision-handler unit test
-│       └── e2e/                  # Selenium: the browser journeys, the page objects,
-│                                 #   and the failure-artifact extension
-├── docs/
-│   ├── requirements/             # What must be built (and what must not)
-│   ├── architecture/             # Structure, diagrams, data model
-│   ├── adr/                      # Architecture Decision Records
-│   ├── testing/                  # Test strategy and the test pyramid
-│   ├── operations/               # Toolchain, CI, Docker, the release process, runbooks
-│   └── evidence/                 # Captured proof per pipeline stage
-└── scripts/                      # ci/ dev/ ops/ helper scripts
++-- src/
+|   +-- main/java/com/vit/assignmentportal/   <- Application source
+|   +-- main/resources/
+|   |   +-- application.yml                   <- Externalised configuration defaults
+|   |   +-- db/migration/                     <- Flyway versioned migrations (V1-V3)
+|   |   +-- static/                           <- CSS, JS assets
+|   |   +-- templates/                        <- Thymeleaf templates
+|   +-- test/java/com/vit/assignmentportal/   <- All test classes
++-- ansible/                                  <- Host provisioning playbook and roles
++-- deploy/                                   <- Host-side release and rollback scripts
++-- scripts/
+|   +-- ci/                                   <- Scripts the Jenkinsfile calls
+|   +-- ops/                                  <- Scripts for release, deploy, rollback
++-- docs/
+|   +-- adr/                                  <- Architecture Decision Records (ADR-001-007)
+|   +-- architecture/                         <- System overview, data model, security, etc.
+|   +-- evidence/                             <- Task evidence (task-01.md to task-15.md)
+|   +-- operations/                           <- Docker, Jenkins, Ansible, rollback, runbook
+|   +-- requirements/                         <- mvp.md (FR-1 through FR-28)
+|   +-- testing/                              <- Test strategy, CI quality gates
+|   +-- viva/                                 <- Viva questions
++-- Dockerfile                                <- Multi-stage production image
++-- Jenkinsfile                               <- Declarative CI/CD pipeline
++-- compose.yaml                              <- Local development stack
++-- pom.xml                                   <- Maven build definition
++-- mvnw / mvnw.cmd                           <- Maven Wrapper (pins Maven 3.9.16)
++-- .env.example                              <- Environment variable template
++-- CLAUDE.md                                 <- Engineering handbook (rules of engagement)
++-- CONTRIBUTING.md                           <- Git workflow, commit conventions
++-- SECURITY.md                               <- Security policy and contact
 ```
 
-## Documentation map
+---
 
-| Read this | To understand |
+## Key documents for a new reader
+
+| Start here | Then read |
 | --- | --- |
-| [`CLAUDE.md`](CLAUDE.md) | The rules this repository is built by — start here |
-| [`docs/requirements/mvp.md`](docs/requirements/mvp.md) | Exact MVP scope and explicit exclusions |
-| [`docs/architecture/system-overview.md`](docs/architecture/system-overview.md) | Runtime and deployment topology |
-| [`docs/architecture/application-structure.md`](docs/architecture/application-structure.md) | Package-by-feature layout and dependency direction |
-| [`docs/architecture/data-model.md`](docs/architecture/data-model.md) | User, Submission, SubmissionStatusHistory |
-| [`docs/adr/`](docs/adr/) | Why each architectural decision was made |
-| [`docs/testing/strategy.md`](docs/testing/strategy.md) | What is tested at each layer |
-| [`docs/operations/toolchain.md`](docs/operations/toolchain.md) | Required tool versions |
-| [`docs/operations/docker.md`](docs/operations/docker.md) | The production image, the Compose stack, and the container lifecycle |
-| [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md) | The release process: what each ref does, publishing to Docker Hub, deploying and rolling back |
-| [`docs/operations/ansible.md`](docs/operations/ansible.md) | Provisioning a Linux host: the inventory, the roles, the variables, the vault, idempotency, and the systemd service |
-| [`docs/operations/release-runbook.md`](docs/operations/release-runbook.md) | How to run a release: the checklist, the procedure, the record, and what each class of failure means |
-| [`docs/operations/rollback.md`](docs/operations/rollback.md) | How to go back, and the one rule that decides whether going back is safe |
-| [`docs/operations/backup-restore.md`](docs/operations/backup-restore.md) | What is backed up, when, and how to restore it — and the row/bytes asymmetry that makes it two problems |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to propose a change |
-| [`SECURITY.md`](SECURITY.md) | How uploads, secrets, and vulnerabilities are handled |
-
-## Quick start
-
-Requires a **JDK 21** and a **running Docker daemon**. No local Maven install is needed — the
-wrapper downloads it.
-
-> **Set `JAVA_HOME` to your JDK 21 before building.** Maven picks its JDK from `JAVA_HOME`
-> and otherwise falls back to whichever `java.exe` is first on `PATH`. On a machine that also
-> has a newer JDK installed, the build stops at the Java 21 check.
->
-> ```powershell
-> $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot'
-> ```
->
-> `JAVA_HOME` is the JDK **root** — not its `bin` directory, and not `java.exe`. Confirm with
-> `mvn -version`, which prints the JDK actually in use.
-
-> The Maven Wrapper is committed and pins **Maven 3.9.16**, so steps 3 and 4 need no local Maven
-> install. Regenerate it only if that pin should move:
->
-> ```bash
-> mvn -N wrapper:wrapper -Dmaven=3.9.16 -Dtype=only-script
-> ```
->
-> See [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine)
-> for the gaps still open on this machine.
-
-```bash
-# 1. Create your local environment file and replace every change-me value
-cp .env.example .env
-
-# 2. Start MySQL 8.4
-docker compose up -d db
-
-# 3. Build, and run the unit and integration suites
-./mvnw clean verify
-
-# 4. Run the application
-./mvnw spring-boot:run
-
-# 5. Confirm it is alive
-curl http://localhost:8080/actuator/health
-```
-
-On Windows PowerShell or `cmd.exe`, replace `./mvnw` with `.\mvnw.cmd`.
-
-The application reads `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `UPLOAD_STORAGE_PATH`, and
-`APP_PORT` from the environment. Every variable, with its meaning, is documented in
-[`.env.example`](.env.example). Committed defaults live in
-[`application.yml`](src/main/resources/application.yml); **no secret is ever committed**.
-
-`clean verify` requires Docker: the integration test starts a real MySQL 8.4 container rather
-than an in-memory substitute, so the migration is exercised on the engine that ships. See the
-[test strategy](docs/testing/strategy.md).
-
-## Next milestone readiness
-
-**Milestone 5 — the delivery pipeline.** The application covers the MVP's functional scope: a
-student can submit and read a decision, and a reviewer can decide. The continuous-integration half
-of the pipeline exists — [`Jenkinsfile`](Jenkinsfile) runs the build, the unit, integration and
-Selenium suites, a started test environment, and the quality gate that refuses to build an image
-from a failed revision. The image is defined: a multi-stage [`Dockerfile`](Dockerfile) that packages
-the JAR Maven built. The delivery half is now written too — the release process (`deploy/`,
-`scripts/ops/`, [`docs/operations/docker-cd.md`](docs/operations/docker-cd.md)), provisioning
-([`ansible/`](ansible), [`docs/operations/ansible.md`](docs/operations/ansible.md)), and release
-control and recovery ([`release-runbook.md`](docs/operations/release-runbook.md),
-[`rollback.md`](docs/operations/rollback.md),
-[`backup-restore.md`](docs/operations/backup-restore.md)). What is still absent is TLS, a firewall,
-and a restore that has ever been rehearsed.
-
-The image is **written, not built** — `Dockerfile` and `compose.yaml` were added in a sandbox with no
-route to a registry, so no `docker build` has run. The same is true of every delivery, provisioning
-and recovery artefact: no push, no deploy, no rollback, no playbook run, no backup, no restore.
-`deploy/tests/release-rollback-demo.sh` was written to exercise the release and rollback scripts
-against a stubbed Docker daemon and a stub application, **and it has itself never run** — so it
-furnishes no evidence either. See
-[`docs/operations/docker.md` §8](docs/operations/docker.md) for the list of unverified claims and
-the commands that would close them.
-
-The audit trail (FR-24), still outstanding from Milestone 2, is the one functional criterion not yet
-met and should either ride along with Milestone 5 or be explicitly deferred in an ADR.
-
-Nothing in Milestone 5 should be started before the current build is green, because a pipeline that
-has never seen a passing build has nothing to demonstrate.
-
-Entry criteria: [`CLAUDE.md` §13](CLAUDE.md#13-next-milestone-readiness).
-
-## Unverified claims
-
-**The last recorded green build is Milestone 2's** — 30 Failsafe tests and 5 Surefire tests, zero
-failures. That run predates every file Milestones 3 and 4 added, so it is evidence for the milestones
-behind us and for nothing in the two in front of us.
-
-The build has since been re-run **three times** on **2026-10-02**, and between them the three runs
-tell the whole story.
-
-**Run 1 — reached test execution, no Docker daemon.** Both source sets compiled (observed, not
-assumed: Failsafe discovered and reported all 112 integration tests individually, which it cannot do
-unless test compilation succeeded at this revision) and the **unit suite passed — 60 tests, 0
-failures, 0 errors, 0 skipped**, including Milestone 4's own `ReviewControllerTest` (5) and
-`SubmissionControllerTest` (3). The **integration suite then aborted entirely**: all 112 tests across
-10 classes errored at *class initialisation*, before any test body ran, with the root cause printed
-once on the first test of the first class:
-
-```
-Caused by: java.lang.IllegalStateException: Could not find a valid Docker environment.
-    at org.testcontainers.containers.GenericContainer.start(GenericContainer.java:316)
-    at com.vit.assignmentportal.MySqlIntegrationTest.<clinit>(MySqlIntegrationTest.java:59)
-```
-
-`MySqlIntegrationTest` starts its shared MySQL 8.4 container in a static initialiser; with no engine
-reachable that initialiser throws, the class is poisoned for the rest of the JVM, and every subclass
-fails with `NoClassDefFoundError: Could not initialize class …` — which is what the other 111 errors
-are. **Not one line of the code under test was reached.**
-
-**Run 2 — Docker up, and the suite finally executed: 112 tests, 2 failures, 0 errors.** Both
-failures were **real defects in the Milestone 3/4 work described below**, and both have been fixed:
-
-| Test | Symptom | Cause |
-| --- | --- | --- |
-| `SubmissionUploadIT.returnsTheEnteredMetadataToTheFormAfterARefusal` | A refused upload came back with the Title field set to the *page's own* `<title>` text instead of what the student typed | `fragments/layout.html` declared `th:fragment="page(title, body)"`. A fragment parameter is a local variable over everything `th:insert` splices in, so `${title}` in `upload.html` resolved to the parameter rather than the flashed model attribute |
-| `UiRenderingIT.rendersTheErrorPageWithoutExposingInternals` | `No ModelAndView found` — a JSON body, not the error page | A bare `GET /error` has no `Accept` header, so `BasicErrorController` chose its JSON handler; the test then asserted on an HTML view that was never resolved |
-
-**Run 3 — both fixes confirmed, and a third defect found: 113 tests, 1 failure, 0 errors.** The two
-run-2 defects are gone. The count rose by one because the error-page test was split into a 500 case
-and a 404 case. The remaining failure was the most instructive of the three, because an assertion
-written to look for something else found it: `rendersTheErrorPageWithoutExposingInternals` asserts
-the page does not contain the word "exception", and it did — because `error.html`'s own comment
-saying "an exception that reaches the container" was being **served to the browser**. Thymeleaf emits
-an ordinary HTML comment verbatim: `<!-- … -->` is content, not whitespace. Every page was shipping
-its engineering notes, and the error page's notes name `BasicErrorController` and
-`SecurityConfiguration` — the disclosure `CLAUDE.md` §7 rule 11 forbids, on the page an anonymous
-visitor is most likely to reach. Fixed by writing every comment that can reach a browser as a
-Thymeleaf **parser-level** comment, which the parser discards before rendering: 51 comments across 18
-of the 19 template files. The assertion was **not** relaxed — it now passes because nothing reaches
-the browser, and a new `shipsNoTemplateCommentaryToTheBrowser` test enforces the rule on its own
-terms.
-
-**None of the three fixes has been re-run.** Everything below describes run 3's state; the repaired
-tests are what stands between this revision and a green build.
-
-As of 2026-10-07. The test-status rows below were established by the 2026-10-02 runs and nothing has
-been re-run since; the Docker rows were added on 2026-10-06 and the release rows on 2026-10-07, and
-neither set has been run at all:
-
-| Claim | Status |
-| --- | --- |
-| `./mvnw clean verify` passes **at this revision** | **Failed** — run 3: the unit suite was green and 113 integration tests executed, 1 failing. All three defects it found are fixed and unverified. The last *green* run remains Milestone 2's |
-| All main sources compile | **Observed** — both runs compiled both source sets at this revision |
-| All test sources compile | **Observed** — Failsafe reported all 112 integration tests individually in runs 1 and 2, and all 113 in run 3 |
-| The storage unit tests pass | **Passed** — 47 tests across `ChecksumServiceTest`, `FileValidationServiceTest`, `StorageIdentifierTest`, `StorageServiceTest` |
-| The submission and review unit tests pass | **Passed** — `SubmissionControllerTest` (3) and `ReviewControllerTest` (5) are green |
-| The upload, access-isolation, and failure-handling ITs pass | **Passed** — run 3 reported the previously failing "hand the typed metadata back" case green |
-| `ApplicationContextIT` passes with the `submissions` and `submission_status_history` constraints | **Passed** — 17 tests, including the constraint probes |
-| The reviewer workflow IT passes | **Passed** — `ReviewWorkflowIT`, 17 tests |
-| The two-reviewer concurrency IT refuses the loser | **Passed** — `SubmissionConcurrencyIT` |
-| The dashboard IT serves, isolates, and refuses a reviewer | **Passed** — `StudentDashboardIT`, 6 tests |
-| The UI rendering IT finds no script, the vendored stylesheets, and the error page | **One failure in run 3** — the error-page case, on the word "exception" inside a template comment that was being served to the browser. Fixed; the no-script, stylesheet, navigation and sign-out cases passed, and the new no-comment case has not run |
-| The full workflow completes with JavaScript disabled | **Partly observed** — `UiRenderingIT.rendersNoScriptOnAnyStudentPage` passed across every student page |
-| The vendored `bootstrap.min.css` is present and served | **Not run** — the file is not yet in the tree (see below) |
-| Spring Boot 4.1.1 and the starter coordinates resolve | **Verified** — the parent resolves, the JAR is repackaged, the context boots |
-| `V1__baseline.sql` applies and `users` accepts the documented roles | **Verified** by the recorded `ApplicationContextIT` (Milestone 2 revision) |
-| Authentication and route rules behave as documented | **Verified** by the recorded `AuthenticationIT` (11) and `AuthorizationIT` (14) |
-| `compose.yaml` brings MySQL up healthy | **Not run** — the tests use a Testcontainers MySQL rather than the Compose service |
-| the application serves `/actuator/health` | **Not run** |
-| the `Dockerfile` builds an image | **Not run** — no `docker build` has been executed ([docker.md §8](docs/operations/docker.md)) |
-| the image runs as a non-root user and answers its own health check | **Not run** |
-| uploaded files and database rows survive replacing the application container | **Not run** — the procedure is [docker.md §5–§6](docs/operations/docker.md) |
-| A real browser can complete a workflow | **Not run** — the Selenium suite and the environment scripts that start the deployment it drives exist, but no browser run has been executed |
-| The pipeline publishes a versioned image to Docker Hub | **Not run** — nothing has been pushed. The rules are in [docker-cd.md §2](docs/operations/docker-cd.md) |
-| The application reports its own version at `/actuator/info` | **Asserted, not run** — `AuthorizationIT` covers it; the suite has not executed since the endpoint was added |
-| A release is deployed to a host and verified by a smoke test | **Not run** — no host has been contacted |
-| A failed deployment rolls back to the previous version | **Not run** — no rollback has fired, on a host or against a stub. [rollback.md §9](docs/operations/rollback.md) |
-| The release ledger answers "what was the last version that worked" | **Not run** — nothing has written a `success` row. [release-runbook.md §5](docs/operations/release-runbook.md) |
-| `pre-release.sh` takes a MySQL dump before the swap and refuses when it cannot | **Not run** — no backup has been taken from a real database. [backup-restore.md §6](docs/operations/backup-restore.md) |
-| A backup is restored and the restored data is verified | **Not run** — no restore has ever been performed. A backup that has never been restored from is a hypothesis |
-| The release and rollback mechanism, driven end to end under a stubbed Docker daemon | **Not run** — `deploy/tests/release-rollback-demo.sh` exists to do this and has never been executed, so it yields no transcript and no evidence |
-| The release gate keeps a feature branch out of the registry and off a host | **Not run** — the equivalent gate on the image build is observed to skip in [defect-demonstration.md](docs/evidence/defect-demonstration.md); the two new gates have not been exercised |
-| `ansible-playbook` installs Docker and runs the stack as `assignment-portal.service` | **Not run** — nothing in [ansible/](ansible) has been executed. [ansible.md §9](docs/operations/ansible.md) |
-| The second Ansible run converges with `changed=0` | **Not run** — this is the demonstration the playbook exists to make |
-| `systemctl status` / `systemctl restart assignment-portal` behave as documented | **Not run** |
-
-Design intent is recorded and reviewable; behaviour counts as evidence only where a run is named
-above. [`docs/operations/toolchain.md` §9](docs/operations/toolchain.md#9-outstanding-gaps-on-this-machine)
-lists the gaps and how to close each one.
-
-### One outstanding asset
-
-The UI is built on **Bootstrap 5.3.3's stylesheet, vendored** at
-`src/main/resources/static/css/bootstrap.min.css` rather than linked from a CDN, so pages render
-identically on a build agent with no route to the public internet. That file has **not been added to
-the tree yet** — the sandbox this work was done in blocked the download. Until it is fetched, the
-templates will render unprovided Bootstrap class names as no styling at all: the pages remain
-correct and fully usable, but not laid out.
-
-```bash
-curl -sSL -o src/main/resources/static/css/bootstrap.min.css \
-  https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css
-```
-
-Nothing else in the UI depends on that step; it is the only file the templates reference that is not
-already committed.
-
-## License
-
-Not yet decided. Until a licence file is added, this repository is **all rights reserved**
-by its author.
+| This README | [`CLAUDE.md`](CLAUDE.md) -- the engineering handbook |
+| [`docs/requirements/mvp.md`](docs/requirements/mvp.md) | [`docs/architecture/system-overview.md`](docs/architecture/system-overview.md) |
+| [`docs/architecture/application-structure.md`](docs/architecture/application-structure.md) | [`docs/adr/`](docs/adr/) |
+| [`docs/testing/strategy.md`](docs/testing/strategy.md) | [`docs/operations/jenkins-ci.md`](docs/operations/jenkins-ci.md) |
+| [`docs/operations/release-runbook.md`](docs/operations/release-runbook.md) | [`docs/operations/rollback.md`](docs/operations/rollback.md) |
+| [`docs/evidence/`](docs/evidence/) | [`docs/viva/questions.md`](docs/viva/questions.md) |

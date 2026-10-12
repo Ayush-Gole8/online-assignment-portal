@@ -72,3 +72,9 @@ produced it. Evidence without a revision is an anecdote.
 
 The rollback drill is the one most often skipped and the one most worth having. A rollback
 path that has never been exercised is a hypothesis.
+
+## 5. Academic task capture guides
+
+The [task-to-evidence mapping](task-mapping.md) links fifteen project-derived academic tasks to implementation files, repeatable demos, expected outcomes, and the artifact to capture. The repository does not contain the institution's numbered rubric, so align these labels to the official task wording before submission if needed.
+
+Each guide from [task-01.md](task-01.md) through [task-15.md](task-15.md) is a capture plan. Its `PENDING_CAPTURE` markers mean that screenshot, log, or test output has not yet been retained; they are not evidence of a successful run. Follow the capture rules above and replace the marker only after saving the real artifact.
