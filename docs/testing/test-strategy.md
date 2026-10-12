@@ -218,3 +218,21 @@ Honest statement of what this suite does not yet do:
    "a valid PDF".
 5. Fix the clock. `SubmissionService` takes a `Clock`; a test that tolerates "sometime around now"
    cannot state which instant an event should carry.
+
+## 9. Engineering review notes (2026-10-12)
+
+- **Assertions and fixtures:** use the behavior-oriented fixture helpers in `support/` and assert
+  persisted rows, status/history, access outcomes, and file bytes when those are the behavior under
+  test. The deterministic test factories are synthetic and must not be reused for production data.
+- **Integration isolation:** MySQL is shared by the integration suite for startup cost, and the
+  upload root is a temporary directory for the test JVM. Keep fixture identities distinct between
+  tests and avoid assertions that depend on global row counts or execution order. A shared server
+  is not, by itself, test isolation.
+- **Browser suite:** keep selectors and user actions in the Selenium Page Objects under
+  `e2e/pages/`. Wait on observable page conditions with explicit waits; do not add fixed sleeps.
+  `E2EFailureArtifacts` captures a viewport screenshot, page source, and failure metadata before
+  browser teardown, and CI archives `target/e2e-artifacts/`.
+- **Run status:** the end-to-end suite and recent changes remain unproven until the relevant Maven
+  command runs. A successful `clean verify -DskipTests` checks compilation and packaging only; it
+  does not replace `clean verify` with Docker available or the deployment-backed E2E run. Preserve
+  actual command output in `docs/evidence/` before changing an unverified status.

@@ -230,9 +230,14 @@
       </plugin>
 
       <!--
-        Enforce Java 21 explicitly rather than relying on the parent's conventions.
-        A build on the wrong JDK fails immediately with a clear message instead of
-        producing classes compiled to an unexpected bytecode level.
+        Enforce the build's preconditions rather than relying on the parent's conventions or on
+        the operator's environment.
+
+        Three rules, and each catches a failure that is otherwise discovered much later: the JDK
+        (a wrong one produces bytecode at an unexpected level), the Maven version (the wrapper
+        pins 3.9.16, and a hand-run `mvn` may not be that), and one-version-per-dependency (the
+        rule below). None of them is a style check, so none of them can fail a build that is
+        merely untidy.
       -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -240,7 +245,7 @@
         <version>3.5.0</version>
         <executions>
           <execution>
-            <id>enforce-java-21</id>
+            <id>enforce-toolchain</id>
             <goals>
               <goal>enforce</goal>
             </goals>
@@ -268,6 +273,20 @@
                 <requireMavenVersion>
                   <version>[3.9,)</version>
                 </requireMavenVersion>
+                <!--
+                  One dependency, one version — managed by the BOM.
+
+                  Every dependency in this file is declared without a <version>, so the Spring
+                  Boot BOM (and, for the Selenium and Testcontainers test dependencies, the same
+                  BOM) is the single authority on what version each library resolves to. The rule
+                  fails the build the moment a second, concrete version appears for one artifact,
+                  which is the way a build stops being reproducible: two declarations of one
+                  library, resolved by whatever order Maven happened to read them in.
+
+                  It is safe to enable at this revision because it cannot fail: no dependency
+                  here declares a version, which is checkable by inspection.
+                -->
+                <banDuplicatePomDependencyVersions/>
               </rules>
             </configuration>
           </execution>

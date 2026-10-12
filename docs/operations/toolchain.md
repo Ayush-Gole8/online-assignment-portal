@@ -81,9 +81,9 @@ Until a row is filled in, treat it as **unverified** and do not claim the prereq
 | --- | --- | --- | --- | --- | --- |
 | JUnit 5 | Managed by the Spring Boot BOM | `./mvnw dependency:tree` | Managed — **unverified** | — | Arrives via `spring-boot-starter-test` |
 | Testcontainers | Managed by the Spring Boot BOM | build log | **2.0.5** | 2026-10-01 | `Testcontainers version: 2.0.5`. Testcontainers **2.x renamed its modules**: `testcontainers-mysql` and `testcontainers-junit-jupiter`, not the 1.x `mysql` / `junit-jupiter` |
-| Selenium | 4.x | — | **Not yet a dependency** | — | Arrives with the end-to-end milestone |
-| Chrome / Chromium | Current stable | `chrome --version` | `TBD` — **unverified** | — | Selenium end-to-end driver in CI |
-| Browser driver | Managed by Selenium Manager | — | `TBD` — **unverified** | — | |
+| Selenium | 4.x | `./mvnw dependency:tree` | **Declared** — `selenium-java`, test scope, version managed by the Spring Boot BOM (4.x) — **exact version unverified** | — | Drives the two `*E2E` classes under `src/test/java/.../e2e/`, which run only under the `e2e` profile. Declared without a `<version>`, so the BOM resolves it; `./mvnw dependency:tree` records which release that is |
+| Chrome / Chromium | Current stable | `chrome --version` | `TBD` — **unverified** | — | Selenium end-to-end driver in CI. `BaseE2ETest` launches `--headless=new`; nothing in the repository pins a browser build |
+| Browser driver | Managed by Selenium Manager | — | `TBD` — **unverified** | — | Selenium Manager resolves the driver for the installed Chrome at run time, so no driver is committed and none is on `PATH` by design |
 
 ## 7. Browser support matrix
 
@@ -253,3 +253,37 @@ remain *unverified* for the same reason as every other row here. Nothing in this
 from *unverified* to a real version until a `vX.Y.Z` tag is built end to end and the run recorded
 under [`docs/evidence/`](../evidence/README.md) — which still cannot happen before a green
 `./mvnw clean verify`.
+
+## 10. Engineering review notes (2026-10-12)
+
+- **Java enforcement is in the build.** `maven-enforcer-plugin` requires Java `[21,22)` and
+  Maven 3.9 or newer; the checked-in Maven Wrapper selects 3.9.16. The build also rejects
+  duplicate dependency declarations with conflicting versions. Use `./mvnw` (or `mvnw.cmd` on
+  Windows) so the wrapper, rather than a machine-installed Maven, selects the build tool.
+- **Style policy:** `.editorconfig` is the repository-wide source for whitespace, line endings,
+  and indentation. No formatter or static-analysis suite is added; the project has no demonstrated
+  need for a larger build toolchain. Keep code review focused on the feature packages and the
+  constraints already enforced by compilation, Enforcer, migrations, and tests.
+- **Source review:** no generic utility bucket or clearly orphaned production package was found;
+  controllers delegate, repositories hold persistence queries, and read models centralize entity
+  mapping. `SubmissionService` is the largest class (548 lines) because it owns upload/file and row
+  transaction coordination plus submission reads and review transitions. It is a maintenance
+  hotspot, but splitting it now would add a boundary across the security/transaction ownership
+  model without test evidence. Keep future changes behavior-focused and revisit extraction when
+  tests can lock down that boundary.
+- **Clean build command:** `./mvnw clean verify` is the deterministic full command and requires
+  Docker for Testcontainers. On 2026-10-12, `mvnw.cmd -B clean verify -DskipTests` completed
+  successfully on this Windows workspace: Enforcer passed Java and Maven version and duplicate
+  dependency checks; Maven compiled 49 production and 42 test source files for release 21 and
+  packaged the executable JAR. Surefire and Failsafe explicitly skipped execution. This is a
+  compilation/package check, not test evidence; retain the last-run evidence in §9 and
+  `docs/testing/test-strategy.md` rather than treating it as a green test suite.
+- **Infrastructure checks:** both Compose files passed `docker compose config --quiet` using their
+  example environment files. The Docker daemon was unavailable, so the image was not built. Ansible
+  syntax validation was also unavailable because `ansible-playbook` is not installed; provisioning
+  and idempotency remain source-reviewed, not executed.
+- **Container reproducibility remains incomplete:** the application image is tagged with a
+  version/commit by CI, but its Java and MySQL base references are mutable tags, not digests.
+  Docker Compose and Ansible/collection versions also need recording before an operator can
+  reproduce a deployment byte-for-byte. See the open items in
+  [`security-review.md`](../security/security-review.md).

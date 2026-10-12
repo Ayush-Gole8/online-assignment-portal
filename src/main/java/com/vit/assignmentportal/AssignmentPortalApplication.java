@@ -10,7 +10,8 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
  * <p>A single deployable modular monolith with embedded Tomcat (ADR-001, ADR-002). Feature
  * packages are added as the features themselves are built: {@code auth} arrived with the
  * authentication milestone, {@code storage} and {@code submission} with the student upload
- * slice. {@code review} is still to come.
+ * slice, and {@code review} with the reviewer decision. The three feature packages the
+ * structure document names — {@code auth}, {@code submission}, {@code review} — all exist.
  *
  * <p>Component scanning starts here and covers {@code com.vit.assignmentportal}.
  *
