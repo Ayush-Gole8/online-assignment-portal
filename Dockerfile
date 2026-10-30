@@ -87,7 +87,7 @@ COPY target/online-assignment-portal-0.0.1-SNAPSHOT.jar application.jar
 # depends on no -SNAPSHOT artefacts, so whether the extractor writes an empty
 # `snapshot-dependencies/` at all is an implementation detail of the version in
 # use — and a COPY whose source directory does not exist fails the build.
-RUN java -Djarmode=tools -jar application.jar extract --layers --destination extracted \
+RUN java -Djarmode=tools -jar application.jar extract --launcher --layers --destination extracted \
  && mkdir -p extracted/snapshot-dependencies
 
 # ---------------------------------------------------------------------------
