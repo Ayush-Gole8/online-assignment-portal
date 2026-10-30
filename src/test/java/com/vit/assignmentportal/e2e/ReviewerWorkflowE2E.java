@@ -66,6 +66,9 @@ class ReviewerWorkflowE2E extends BaseE2ETest {
     private void createSubmissionAsStudent(String title) throws Exception {
         new LoginPage(driver, getBaseUrl()).loginAs(STUDENT_EMAIL, PASSWORD);
 
+        driver.get(getBaseUrl() + "/student/dashboard");
+        assertThat(new StudentDashboardPage(driver).isLoaded()).isTrue();
+
         new StudentDashboardPage(driver).navigateToUpload(getBaseUrl());
 
         File pdf = createDummyPdf("reviewer-test");
