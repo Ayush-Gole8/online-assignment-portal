@@ -89,3 +89,7 @@ test-output/
 vault-password
 vault-password.txt
 *.vault-password
+
+# Local agent and scratch tooling
+.agents/
+scratch/
