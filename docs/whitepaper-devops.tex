@@ -1,0 +1,703 @@
+% =====================================================================
+%  DevOps Technical White Paper
+%  "One Verified Path from Pull Request to Production"
+%
+%  COMPILE WITH XeLaTeX  (Overleaf: Menu -> Compiler -> XeLaTeX)
+%  pdfLaTeX will NOT work: this file loads fontspec to honour the
+%  Segoe UI formatting requirement.
+%
+%  ------------------------------------------------------------------
+%  FONT NOTE (read once)
+%  ------------------------------------------------------------------
+%  The brief asks for Segoe UI. Segoe UI is a Microsoft font and is NOT
+%  installed on Overleaf, so the preamble tries four sources in order:
+%     1. segoeui.ttf etc. uploaded into this Overleaf project
+%     2. a system-installed "Segoe UI" family (true on Windows)
+%     3. Lato            (humanist sans, present in TeX Live)
+%     4. TeX Gyre Heros  (always present; last resort)
+%  To get *literal* Segoe UI on Overleaf, upload these four files from
+%  C:\Windows\Fonts into the project root:
+%     segoeui.ttf  segoeuib.ttf  segoeuii.ttf  segoeuiz.ttf
+%  Nothing else needs to change; branch 1 then wins automatically.
+%
+%  ------------------------------------------------------------------
+%  Student and guide details taken from the supplied draft. A course code
+%  was not supplied, so the title page names the course without inventing one.
+% =====================================================================
+
+\documentclass[10pt,a4paper]{article}
+
+% ---------- geometry: A4 portrait ----------
+\usepackage[a4paper,top=2.2cm,bottom=2.2cm,left=2.2cm,right=2.2cm,footskip=1cm]{geometry}
+
+% ---------- fonts (Segoe UI with a graceful fallback chain) ----------
+\usepackage{fontspec}
+\newif\ifsegoefound \segoefoundfalse
+
+\IfFontExistsTF{segoeui.ttf}{%
+  \setmainfont{segoeui.ttf}[
+    BoldFont       = segoeuib.ttf,
+    ItalicFont     = segoeuii.ttf,
+    BoldItalicFont = segoeuiz.ttf,
+    Ligatures      = TeX ]
+  \segoefoundtrue
+}{%
+  \IfFontExistsTF{Segoe UI}{%
+    \setmainfont{Segoe UI}[Ligatures=TeX]
+    \segoefoundtrue
+  }{%
+    \IfFontExistsTF{Lato}{%
+      \setmainfont{Lato}[Ligatures=TeX]
+    }{%
+      \setmainfont{texgyreheros-regular.otf}[
+        BoldFont       = texgyreheros-bold.otf,
+        ItalicFont     = texgyreheros-italic.otf,
+        BoldItalicFont = texgyreheros-bolditalic.otf,
+        Ligatures      = TeX ]
+    }%
+  }%
+}
+
+\IfFontExistsTF{DejaVu Sans Mono}{%
+  \setmonofont{DejaVu Sans Mono}[Scale=0.85]
+}{%
+  \setmonofont{texgyrecursor-regular.otf}[
+    BoldFont   = texgyrecursor-bold.otf,
+    ItalicFont = texgyrecursor-italic.otf,
+    Scale      = 0.85 ]
+}
+
+% ---------- layout, colour, typography ----------
+\usepackage{setspace}
+\setstretch{1.15}                     % brief: 1.15 or 1.5
+\usepackage[dvipsnames,table]{xcolor}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage{microtype}
+\usepackage{xurl}
+\usepackage{lastpage}
+\usepackage[hidelinks,breaklinks=true]{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
+
+% long monospace paths must not produce overfull lines
+\setlength{\emergencystretch}{3em}
+\renewcommand{\refname}{References}
+
+\definecolor{slate}{HTML}{1F2937}
+\definecolor{steel}{HTML}{334155}
+\definecolor{muted}{HTML}{64748B}
+\definecolor{rule}{HTML}{94A3B8}
+\definecolor{srcfill}{HTML}{EEF2FF}
+\definecolor{cifill}{HTML}{ECFDF5}
+\definecolor{relfill}{HTML}{FFF7ED}
+\definecolor{depfill}{HTML}{EFF6FF}
+\definecolor{verfill}{HTML}{FDF2F8}
+\definecolor{alert}{HTML}{B91C1C}
+\definecolor{headrow}{HTML}{F1F5F9}
+
+\color{slate}
+
+% ---------- the details to personalise ----------
+\newcommand{\mytitle}{One Verified Path from Pull Request to Production}
+\newcommand{\mysubtitle}{A Pipeline-First DevOps Architecture for a Git-Driven Online
+Assignment Submission Portal}
+\newcommand{\myname}{Ayush Gole}
+\newcommand{\myreg}{23102A0005}
+\newcommand{\mydept}{Department of Computer Engineering, Vidyalankar Institute of Technology}
+\newcommand{\myguide}{Dr. Snehal Andhare}
+\newcommand{\mycourse}{DevOps}
+
+% ---------- headings: 12 pt bold ----------
+\titleformat{\section}{\fontsize{12}{14.4}\selectfont\bfseries\color{steel}}
+            {\thesection.}{0.6em}{}
+\titlespacing*{\section}{0pt}{9pt plus 2pt minus 1pt}{4pt}
+\titleformat{\subsection}{\fontsize{10.5}{12.6}\selectfont\bfseries\color{steel}}
+            {\thesubsection}{0.6em}{}
+\titlespacing*{\subsection}{0pt}{6pt plus 1pt minus 1pt}{2pt}
+
+\captionsetup{font={small},labelfont={bf},skip=5pt,justification=justified}
+\setlist[itemize]{leftmargin=1.25em,itemsep=1.5pt,topsep=2.5pt,parsep=0pt}
+\setlist[enumerate]{leftmargin=1.6em,itemsep=2pt,topsep=2.5pt,parsep=0pt}
+
+% ---------- running footer ----------
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[L]{\footnotesize\color{muted}DevOps Technical White Paper -\ \myname}
+\fancyfoot[R]{\footnotesize\color{muted}Page \thepage\ of \pageref{LastPage}}
+
+% table helpers
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\renewcommand{\arraystretch}{1.12}
+
+\begin{document}
+
+% =====================================================================
+% PAGE 1 -- TITLE
+% =====================================================================
+\thispagestyle{empty}
+\begin{center}
+\vspace*{1.6cm}
+
+{\footnotesize\color{muted}INDIVIDUAL TECHNICAL WHITE PAPER}\\[0.25cm]
+{\color{rule}\rule{0.42\textwidth}{0.6pt}}\\[0.9cm]
+
+{\fontsize{16}{19.2}\selectfont\bfseries \mytitle\par}
+\vspace{0.45cm}
+{\fontsize{12}{15}\selectfont\bfseries\color{steel} \mysubtitle\par}
+
+\vspace{0.9cm}
+{\color{rule}\rule{0.42\textwidth}{0.6pt}}\\[1.1cm]
+
+{\fontsize{11}{13.2}\selectfont
+\textbf{Submitted by}\\[0.2cm]
+{\fontsize{12}{14.4}\selectfont\bfseries \myname}\\[0.15cm]
+\myreg\\[0.15cm]
+\mydept\par}
+
+\vspace{0.9cm}
+
+{\fontsize{11}{13.2}\selectfont
+\textbf{Guide}\\[0.2cm]
+{\fontsize{12}{14.4}\selectfont\bfseries \myguide}\par}
+
+\vspace{0.9cm}
+
+{\fontsize{11}{13.2}\selectfont
+\textbf{Course}\\[0.2cm]
+\mycourse\par}
+
+\vfill
+
+{\footnotesize\color{muted}
+Subject of the paper: the delivery pipeline of \texttt{online-assignment-portal} -\\
+a Spring Boot modular monolith delivered by GitHub, Jenkins, Maven, Testcontainers,\\
+Selenium, Docker, a container registry, and Ansible.\\[0.5cm]
+October 2026}
+
+\vspace{0.4cm}
+\end{center}
+
+\newpage
+
+% =====================================================================
+% PAGE 2 -- ABSTRACT, INTRODUCTION, PROBLEM STATEMENT
+% =====================================================================
+\section*{Abstract}
+
+A coursework submission portal is a small application; delivering it dependably is not a small
+problem. This paper takes the delivery pipeline of a Git-driven online assignment submission
+portal -\ a Spring Boot modular monolith in which students upload PDF coursework and
+reviewers record one terminal decision -\ and proposes an architecture in which a
+change reaches a running host along exactly one automated path. The governing commitment is that
+\emph{the artefact which is tested is the artefact which runs}: Maven produces one executable
+JAR, a multi-stage \texttt{Dockerfile} packages that JAR without rebuilding it, a Git tag of the
+form \texttt{vX.Y.Z} is the only thing that names a version, and the deployed container
+republishes that version at \texttt{/actuator/info} so a post-deployment smoke test can prove
+that the release deployed is the release answering. Integration tests run against a containerised
+MySQL~8.4 rather than an in-memory substitute, so migrations and constraints are exercised by the
+engine that runs in production; provisioning is expressed as Ansible roles that leave the stack
+under \texttt{systemd}; and recovery is a designed path built from a pre-release gate, an
+append-only release ledger, and a rollback to the last version a ledger row marks stable. The
+paper compares this design with manual deployment, hosted CI and full orchestration, separates
+what has been executed from what is written but unproven, and sets out an extension path covering
+TLS, supply-chain attestation, zero-downtime release and DORA instrumentation.
+
+\section{Introduction}
+
+The application is deliberately modest: students authenticate, upload a PDF and read the outcome;
+reviewers see a queue of submitted work and record one decision that is final. The real
+deliverable is the path that carries a change -\ a pull request on GitHub, review,
+Jenkins, Maven, unit tests, integration tests, Selenium end-to-end tests, a Docker image, a
+registry, Ansible provisioning, deployment, a health check and a rollback -\ repeatably
+and with evidence. Complexity added to the application is therefore a cost charged against the
+pipeline budget, and a feature the pipeline cannot test, build and deploy is not finished.
+
+That modest scope still contains what makes deployment hard in practice: \textbf{state, in two
+incompatible forms}. A submission is a row in MySQL \emph{and} a file of bytes on a volume, and
+the two cannot be written in one transaction. A container filesystem is ephemeral, so the bytes
+must outlive the container that wrote them; a migration moves forward while a rollback moves
+backward; and an upload is hostile input until proven otherwise. A pipeline here must therefore
+replace a process \emph{while} preserving two kinds of durable state and remaining able to go
+back. This paper contributes an analysis of why common delivery approaches under-serve a
+single-host, state-bearing deployment of this size (Section~3); a pipeline architecture whose
+distinguishing rules are \emph{tag-as-version} and \emph{verification-by-version-assertion}
+(Section~4); an implementation path mapped onto concrete artefacts rather than generic advice
+(Section~5); and an account that separates executed stages from written-but-unproven ones
+(Section~6).
+
+\section{Problem Statement}
+
+Six defects recur in student and small-team delivery, and each is a requirement in disguise.
+
+\begin{enumerate}[label=\textbf{D\arabic*.},leftmargin=2.3em]
+  \item \textbf{Artefact drift.} The software is rebuilt per environment, so the binary that was
+        tested is not the binary that runs; every rebuild is an untested change, and
+        configuration baked at build time makes promotion impossible.
+  \item \textbf{Substituted test dependencies.} Persistence is tested on an in-memory database, so
+        migrations, \texttt{CHECK} constraints, unique indexes and real locking behaviour are
+        never exercised where failure is cheap.
+  \item \textbf{Unidentifiable releases.} A mutable \texttt{latest} tag means no host can answer
+        ``which version is running here'', and two machines pulling one tag can run different
+        code.
+  \item \textbf{Recovery by improvisation.} Rollback means rebuilding an older commit under
+        pressure, and the identity of the last version that actually worked is recorded nowhere a
+        script can read.
+  \item \textbf{State asymmetry.} Rows and bytes are protected by different mechanisms and
+        restored by different commands, so a backup of one is mistaken for a backup of the
+        submission.
+  \item \textbf{Verification by anecdote, secrets by convenience.} A deployment is called
+        successful because a page loaded rather than because the build asserted its own version,
+        while credentials sit in committed files because externalising them was never the easy
+        path.
+\end{enumerate}
+
+\noindent\textbf{Objective.} Build one artefact once, prove it against production-grade
+dependencies, publish it under an immutable version, deploy it by script to a provisioned host,
+verify it by asserting that the running version equals the released version, and keep it
+reversible to a recorded good version -\ with no secret in the repository at any point.
+
+\newpage
+
+% =====================================================================
+% PAGE 3 -- EXISTING APPROACHES, TOOLS AND LIMITATIONS
+% =====================================================================
+\section{Existing Approaches, Tools and Limitations}
+
+\subsection{Manual and script-driven release}
+The cheapest approach copies a JAR to a host over \texttt{scp} and restarts a service. It needs
+no infrastructure and is the baseline most projects start from, but it supplies none of D1--D6:
+there is no gate, no recorded identity, no reproducible host state, and the knowledge of how to
+deploy lives in one person's shell history. The systematic review by Shahin \textit{et al.}
+records exactly this pattern -\ manual, undocumented deployment -\ as a
+leading obstacle to continuous delivery adoption~\cite{shahin2017,chen2015}, and Humble and
+Farley treat the automated, repeatable deployment as the precondition for everything
+else~\cite{humble2010}.
+
+\subsection{CI platforms: hosted versus self-hosted}
+Hosted runners (GitHub Actions, GitLab CI/CD, CircleCI) remove agent maintenance and express the
+pipeline as versioned YAML, which is the correct instinct: pipeline-as-code. Their limitations
+here are contextual rather than technical -\ build minutes are metered, the Docker
+daemon is someone else's, and the course objective is an owned, inspectable controller.
+Jenkins with a declarative \texttt{Jenkinsfile} keeps the pipeline definition in the repository
+while leaving the agent and its Docker daemon under local control~\cite{jenkins}. The price is
+real: plugin surface area, agent upkeep, and credential hygiene become the project's own
+responsibility, which is why credentials are referenced by identifier and bound only for the
+length of a single stage.
+
+\subsection{Test infrastructure}
+H2 or HSQLDB make persistence tests fast, and that speed is bought by testing a different
+database. Testcontainers inverts the trade: it starts a real MySQL~8.4 in Docker for the duration
+of the suite, so migrations and constraints are proven against the production
+engine~\cite{testcontainers}. Selenium proves that a human can complete a journey through a real
+browser~\cite{selenium}, but it is minutes-slow and becomes flaky when asked to prove business
+rules that a unit test could settle. The practical rule is to test at the lowest layer that can
+prove the behaviour and let the pyramid stay a pyramid.
+
+\subsection{Packaging, registry and orchestration}
+A fat JAR on a host leaves the runtime, the JVM flags, and the filesystem layout implicit. A
+container image makes them explicit, and multi-stage builds keep the published image free of
+build tooling~\cite{dockermulti}. Kubernetes with Helm and a GitOps reconciler such as Argo CD is
+the industry default for multi-instance services, but it imposes a control plane that a
+single-host, single-instance MVP cannot repay; Docker Compose on an Ansible-provisioned host is
+the proportionate choice at this scale~\cite{ansible}. Two registry habits defeat identity
+regardless of orchestrator: mutable tags, and the absence of provenance metadata such as an SBOM
+or a signature~\cite{ociimage,slsa}.
+
+\begin{table}[h]
+\centering
+\caption{Candidate approaches assessed against the objectives of Section~2.}
+\vspace{-2pt}
+{\footnotesize
+\begin{tabularx}{\textwidth}{L{3.05cm} L{3.35cm} X}
+\toprule
+\rowcolor{headrow}\textbf{Approach} & \textbf{Representative tools} &
+\textbf{Principal limitation in this context} \\
+\midrule
+Manual / script release & \texttt{scp}, \texttt{systemctl} & No gate, no identity, no recorded
+way back; host state is undocumented (D1, D3, D4). \\
+Hosted CI & GitHub Actions, GitLab CI & Metered minutes and a borrowed Docker daemon; the
+controller is not ours to inspect or extend. \\
+Self-hosted CI & Jenkins declarative pipeline & Plugin and agent upkeep; credential hygiene
+becomes a project responsibility. \\
+In-memory test DB & H2, HSQLDB & Different dialect: migrations and \texttt{CHECK} constraints
+are never exercised (D2). \\
+Container orchestration & Kubernetes, Helm, Argo CD & Control-plane cost is disproportionate to
+one instance; a second system to provision and secure. \\
+Registry defaults & \texttt{latest}, unsigned images & Version cannot be asserted at runtime; no
+provenance for what was shipped (D3). \\
+\bottomrule
+\end{tabularx}}
+\end{table}
+
+\subsection{The gap this paper addresses}
+Each tool above is sound in its own domain, and none of them, adopted by default, delivers the
+four properties together at this scale: one artefact promoted rather than rebuilt; test fidelity
+against the production database engine; a version identity that the running system can assert
+about itself; and a scripted, evidence-recording way back. The proposal that follows composes
+established tools so that these four hold simultaneously, and deliberately declines the
+orchestration tier whose cost the application cannot yet justify.
+
+\newpage
+
+% =====================================================================
+% PAGE 4 -- PROPOSED TECHNICAL SOLUTION AND ARCHITECTURE
+% =====================================================================
+\section{Proposed Technical Solution and Architecture}
+
+\subsection{Design rules}
+\begin{enumerate}[label=\textbf{R\arabic*.},leftmargin=2.3em]
+  \item \textbf{One artefact, promoted not rebuilt.} \texttt{./mvnw} produces the JAR; the
+        \texttt{Dockerfile} runs no Maven and only packages what the build already produced.
+  \item \textbf{The tag is the version.} A \texttt{vX.Y.Z} Git tag is the sole source of a
+        version~\cite{semver}; a feature branch reaches neither registry nor host, and
+        \texttt{latest} is refused by the publish step rather than merely discouraged.
+  \item \textbf{Prove it at the lowest layer that can.} Unit tests for rules, Testcontainers
+        integration tests for persistence, security wiring and migrations, Selenium only for the
+        browser journey.
+  \item \textbf{Configuration is injected, never baked.} Defaults in \texttt{application.yml},
+        non-secret profile values in profile files, every secret from the environment or a
+        managed store~\cite{owasp2021}.
+  \item \textbf{Recovery is a designed path.} A pre-release gate, an append-only ledger naming
+        the last stable version, and a rollback that is the same code path whether a human or a
+        failing stage invokes it.
+  \item \textbf{A claim is worth its transcript.} Every stage emits an artefact -\ test
+        reports, screenshots, a database dump, a health and smoke transcript, a ledger row
+        -\ so that ``it works'' is a record rather than a recollection.
+\end{enumerate}
+
+\subsection{Architecture}
+
+\begin{figure}[h]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  x=1cm, y=1cm,
+  box/.style={draw=rule, line width=0.45pt, rounded corners=2.5pt, align=center,
+              text width=2.8cm, minimum height=1.15cm, inner sep=3.5pt, font=\scriptsize},
+  src/.style={box, fill=srcfill}, ci/.style={box, fill=cifill},
+  rel/.style={box, fill=relfill}, dep/.style={box, fill=depfill},
+  ver/.style={box, fill=verfill},
+  lane/.style={rotate=90, font=\scriptsize\bfseries, text=muted},
+  flow/.style={-{Stealth[length=4.5pt,width=3.5pt]}, draw=steel, line width=0.5pt},
+  back/.style={-{Stealth[length=4.5pt,width=3.5pt]}, draw=alert, line width=0.5pt, dashed},
+  tag/.style={font=\scriptsize\itshape, text=muted, inner sep=1.5pt}
+]
+
+% ---- lane labels ----
+\node[lane] at (-1.0,0)    {SOURCE};
+\node[lane] at (-1.0,-2.1) {BUILD};
+\node[lane] at (-1.0,-4.2) {RELEASE};
+\node[lane] at (-1.0,-6.3) {DEPLOY};
+\node[lane] at (-1.0,-8.4) {VERIFY};
+
+% ---- row A: source and review ----
+\node[src] (a1) at (1.6,0)  {\textbf{Developer}\\\texttt{./mvnw clean verify}\\locally, before pushing};
+\node[src] (a2) at (5.1,0)  {\textbf{GitHub}\\\texttt{feature/*} branch\\pull request, protected \texttt{main}};
+\node[src] (a3) at (8.6,0)  {\textbf{Peer review}\\PR template: problem,\\approach, verification};
+\node[src] (a4) at (12.1,0) {\textbf{Jenkins trigger}\\declarative \texttt{Jenkinsfile}\\one build per branch};
+\node[src] (a5) at (15.6,0) {\textbf{Secrets}\\credentials store (release)\\Vault (provision)\\host \texttt{.env} (runtime)\\\textit{bound per stage, never committed}};
+
+% ---- row B: CI ----
+\node[ci] (b1) at (1.6,-2.1)  {\textbf{Validate + Build}\\Maven wrapper, Java 21\\enforcer rules};
+\node[ci] (b2) at (5.1,-2.1)  {\textbf{Unit tests}\\JUnit 5, no Spring\\context (Surefire)};
+\node[ci] (b3) at (8.6,-2.1)  {\textbf{Integration tests}\\Testcontainers MySQL 8.4\\+ Flyway V1--V3 (Failsafe)};
+\node[ci] (b4) at (12.1,-2.1) {\textbf{Package}\\one executable JAR\\\textit{built once}};
+\node[ci] (b5) at (15.6,-2.1) {\textbf{Selenium E2E}\\browser journeys vs\\an ephemeral stack};
+
+% ---- row C: release ----
+\node[rel] (c1) at (1.6,-4.2)  {\textbf{Release Version}\\git tag \texttt{vX.Y.Z}\\\textit{the only version source}};
+\node[rel] (c2) at (5.1,-4.2)  {\textbf{Docker Build}\\multi-stage, layered JAR\\non-root UID 1001};
+\node[rel] (c3) at (8.6,-4.2)  {\textbf{Version baked in}\\\texttt{APP\_VERSION} build arg\\$\rightarrow$ \texttt{/actuator/info}};
+\node[rel] (c4) at (12.1,-4.2) {\textbf{Publish Image}\\Docker Hub\\\texttt{acct/repo:vX.Y.Z}};
+\node[rel] (c5) at (15.6,-4.2) {\textbf{Registry}\\immutable tag per release\\\texttt{latest} refused};
+
+% ---- row D: provision and deploy ----
+\node[dep] (d1) at (1.6,-6.3)  {\textbf{Ansible} \texttt{site.yml}\\\texttt{common} \textperiodcentered\ \texttt{docker} \textperiodcentered\ \texttt{application}};
+\node[dep] (d2) at (5.1,-6.3)  {\textbf{Host} \texttt{/opt/assignment-portal}\\\texttt{compose.prod.yaml} + \texttt{.env}\\\texttt{systemd} unit};
+\node[dep] (d3) at (8.6,-6.3)  {\textbf{Pre-release gate}\\volumes verified \textperiodcentered\ MySQL dump\\\texttt{releases/<v>.env} written};
+\node[dep] (d4) at (12.1,-6.3) {\textbf{Deploy}\\\texttt{compose pull} then\\\texttt{up -{}-no-build -{}-wait}};
+\node[dep] (d5) at (15.6,-6.3) {\textbf{Running stack}\\app :8080 + MySQL 8.4\\volumes: uploads, data};
+
+% ---- row E: verify and recover ----
+\node[ver] (e1) at (1.6,-8.4)  {\textbf{Health gate}\\\texttt{GET /actuator/health}\\polled from the agent};
+\node[ver] (e2) at (5.1,-8.4)  {\textbf{Smoke test}\\\texttt{/actuator/info} version\\$=$ the released tag};
+\node[ver] (e3) at (8.6,-8.4)  {\textbf{Release ledger}\\\texttt{releases/ledger.tsv}\\append-only outcome};
+\node[ver] (e4) at (12.1,-8.4) {\textbf{Rollback}\\last version a \texttt{success}\\row marks stable};
+\node[ver] (e5) at (15.6,-8.4) {\textbf{Backup / restore}\\DB dump + upload bytes\\\textit{both halves of a row}};
+
+% ---- in-row flow ----
+\foreach \a/\b in {a1/a2, a2/a3, a3/a4, b1/b2, b2/b3, b3/b4, b4/b5,
+                   c1/c2, c2/c3, c3/c4, c4/c5, d1/d2, d2/d3, d3/d4, d4/d5,
+                   e1/e2, e2/e3, e3/e4, e4/e5}
+  \draw[flow] (\a.east) -- (\b.west);
+
+% ---- row-to-row flow ----
+\draw[flow] (a4.south) -- ++(0,-0.46) -| (b1.north);
+\draw[flow] (b5.south) -- ++(0,-0.46) -| (c1.north);
+\draw[flow] (c5.south) -- ++(0,-0.46) -| (d1.north);
+\draw[flow] (d5.south) -- ++(0,-0.46) -| (e1.north);
+
+% ---- recovery loop: the designed way back ----
+\draw[back] (e4.north) -- (d4.south);
+
+% ---- failure annotation ----
+\node[tag, anchor=west] at (8.3,-9.75) {health or smoke failure $\Rightarrow$ ledger
+records \texttt{failure}, rollback fires};
+\end{tikzpicture}}
+\caption{The proposed pipeline. A change moves down the lanes exactly once: the JAR is built in
+the BUILD lane and never rebuilt, the RELEASE lane bakes the Git tag into the image and
+publishes it under that immutable tag, the DEPLOY lane pulls that tag onto a provisioned host
+behind a pre-release gate, and the VERIFY lane proves the running version equals the released
+version before recording the outcome. The dashed path is the designed way back. Secrets (top
+right) are bound into a single stage by identifier -\ the registry login in the release
+lane, the SSH key and host \texttt{.env} in the deploy lane -\ and appear in no
+committed file.}
+\end{figure}
+
+\newpage
+
+% =====================================================================
+% PAGE 5 -- IMPLEMENTATION STEPS
+% =====================================================================
+\section{Implementation Steps}
+
+\begin{enumerate}[leftmargin=1.9em]
+  \item \textbf{Govern the source.} \texttt{main} is protected and accepts no direct push. Work
+        arrives on a \texttt{feature/}, \texttt{fix/}, \texttt{docs/} or \texttt{refactor/} branch
+        as a pull request whose template states the problem, the approach and the verification
+        actually performed. Commits follow Conventional Commits~\cite{convcommits}, so history is
+        machine-readable and release notes derive from it rather than from memory; branches are
+        kept short-lived so integration stays continuous~\cite{fowlerci}.
+  \item \textbf{Express the pipeline as code.} A declarative \texttt{Jenkinsfile} in the
+        repository defines every stage~\cite{jenkins}. Options pin the behaviour that otherwise
+        bites: timestamped logs, a 90-minute timeout, concurrent builds disabled so two runs
+        cannot race for the same database port and upload volume, and a bounded build history.
+        Credentials appear only as identifiers; values are bound into one stage and nowhere else.
+  \item \textbf{Build with a pinned toolchain.} The Maven Wrapper is the canonical build
+        mechanism, so the agent needs nothing on \texttt{PATH} and every machine resolves the same
+        Maven version~\cite{maven}. Enforcer rules fail the build on a banned dependency or a
+        wrong Java release rather than at runtime.
+  \item \textbf{Run the unit suite first.} JUnit~5 tests with no Spring context assert the
+        business rules in milliseconds -\ decision terminality, the required rejection
+        reason, PDF and size validation -\ so the fast signal arrives before anything
+        expensive starts.
+  \item \textbf{Integration-test against the production engine.} Failsafe tests start MySQL~8.4
+        through Testcontainers and Flyway applies \texttt{V1}--\texttt{V3} into that
+        container~\cite{flyway}, so the suite proves what only a real engine can: migrations,
+        \texttt{CHECK} constraints, unique indexes, optimistic locking under two concurrent
+        reviewers, deny-by-default routes, CSRF enforcement, and hostile uploads -\
+        oversized files, non-PDF bytes behind a \texttt{.pdf} name, and path-traversal filenames.
+  \item \textbf{Package once.} \texttt{./mvnw package} produces the single executable JAR that
+        every later stage consumes; no stage after this one compiles source.
+  \item \textbf{Prove the browser journey against a real stack.} Scripted helpers start the
+        database, start the application, wait for \texttt{/actuator/health}, run the Selenium
+        suite, collect diagnostics and tear the environment down; reports and failure screenshots
+        are archived with the build~\cite{selenium}.
+  \item \textbf{Derive the version from the tag.} The \texttt{vX.Y.Z} tag on the built commit
+        \emph{is} the version~\cite{semver}. The optional \texttt{RELEASE\_VERSION} parameter is an
+        assertion, not an input: when it disagrees with the tag the build fails. A build without a
+        tag publishes nothing.
+  \item \textbf{Build the image deterministically.} A multi-stage \texttt{Dockerfile} extracts the
+        JAR into Spring Boot layers so dependency layers cache across releases, then assembles an
+        \texttt{eclipse-temurin:21-jre} runtime that runs as a non-root user (UID/GID~1001),
+        declares a \texttt{HEALTHCHECK}, bakes the version in through an \texttt{APP\_VERSION}
+        build argument, bounds heap by container memory and stops on
+        \texttt{SIGTERM}~\cite{dockermulti}. The build context admits exactly one file, the JAR.
+  \item \textbf{Publish under an immutable tag.} \texttt{docker login} receives the token on
+        standard input, never as an argument; the image is pushed as
+        \texttt{<account>/<repo>:vX.Y.Z} and a request to publish \texttt{latest} is refused. The
+        pushed digest is the artefact identity downstream~\cite{ociimage}.
+  \item \textbf{Provision the host with Ansible.} \texttt{site.yml} runs three roles:
+        \texttt{common} (base packages, time sync), \texttt{docker} (engine, Compose~v2 plugin,
+        Python SDK, and the two \texttt{daemon.json} settings this project needs -\
+        bounded container logs and \texttt{live-restore}) and \texttt{application} (deploy
+        directory, composition, \texttt{.env}, named volumes, image, and a \texttt{systemd} unit
+        so the stack is operated as a service)~\cite{ansible}. Secrets live in an
+        \texttt{ansible-vault} file referenced explicitly from the playbook, and the role copies
+        the \emph{same} composition the deployment path uses, so two files cannot drift.
+  \item \textbf{Deploy behind a gate.} The agent copies the host scripts over SSH and runs the
+        pre-release gate: volumes verified, a MySQL dump taken, and the release's metadata written
+        under \texttt{releases/}; a host that has released before and has lost a volume is refused
+        rather than upgraded. The gate rewrites exactly two non-secret keys -\ image tag
+        and environment name -\ then \texttt{compose pull} and
+        \texttt{up -{}-no-build -{}-wait} swap in the published container. No \texttt{build:}
+        exists in the deployment composition, so a host runs the tested artefact or fails.
+  \item \textbf{Verify, record, and be able to return.} The agent polls
+        \texttt{/actuator/health}~\cite{springboot}, then the smoke test asserts that
+        \texttt{/actuator/info} reports the version just released and that a protected route is
+        still guarded -\ which is what separates ``up'' from ``correct''. The outcome is
+        appended to the release ledger, and on failure the stage invokes the same rollback command
+        an operator would run by hand, restoring the last version a \texttt{success} row marks
+        stable. One code path, exercised by both routes.
+\end{enumerate}
+
+\newpage
+
+% =====================================================================
+% PAGE 6 -- OUTPUT, BENEFITS, FUTURE SCOPE, CONCLUSION, REFERENCES
+% =====================================================================
+\section{Output and Verification Status}
+
+\textbf{Expected pipeline outputs.} Once run, the stages are designed to retain Surefire and
+Failsafe reports, Selenium screenshots and diagnostics, the packaged JAR, an image tagged
+\texttt{vX.Y.Z} with its registry digest, a pre-release database dump, a
+\texttt{releases/<version>.env} context file, a health and smoke transcript, and a release-ledger
+row. These are expected outputs of the design, not artefacts currently captured in the repository.
+
+\textbf{What has been executed.} Three local \texttt{clean verify} runs were recorded on
+2026-10-02; none established a green full suite. In run 1, both source sets compiled and all 60
+unit tests passed, but the 112 integration tests could not start because Docker was unavailable.
+With Docker available, run 2 executed 112 integration tests and found two defects: a Thymeleaf
+fragment parameter shadowed the upload title model attribute, and the error-page test did not send
+the HTML \texttt{Accept} header. Run 3 executed 113 integration tests, confirmed those two fixes,
+and exposed a third defect: ordinary HTML comments were reaching rendered pages, including notes
+about internal classes and configuration. The repository records fixes for these defects, but no
+follow-up run has established that the complete suite is green. The cases provide concrete
+evidence that testing found defects, while the result remains explicitly unresolved.
+
+\textbf{What has not been executed.} The Jenkins pipeline has not run on an agent. No Docker image
+has been built by the pipeline, pushed to a registry, or deployed; no Ansible playbook or host
+release has run, and no rollback drill has been performed. Selenium and delivery outcomes remain
+unverified as documented by the project. The implementation is therefore a proposed, documented
+delivery path whose operational claims still require captured runs under
+\texttt{docs/evidence/}.
+
+\section{Benefits}
+
+\begin{itemize}
+  \item \textbf{No drift (D1).} One JAR, one image, one digest promoted across environments;
+        configuration arrives at deploy time, so the tested artefact is the running artefact.
+  \item \textbf{Defects caught where they are cheap (D2).} Migration, constraint and concurrency
+        faults surface pre-merge against MySQL~8.4, not during a demonstration.
+  \item \textbf{Answerable identity (D3).} ``Which version is running?'' is an HTTP request;
+        ``which version was last good?'' is a ledger row.
+  \item \textbf{Bounded recovery (D4, D5).} Rollback is one command on a recorded target, the
+        automatic and manual paths are the same code, and both halves of a submission -\
+        row and bytes -\ have a named backup and restore procedure.
+  \item \textbf{Security by default (D6).} No secret in the repository, non-root container,
+        externalised configuration, CSRF enabled, server-side authorisation on every request, and
+        uploads served only as attachments~\cite{nist800190,owasp2021}.
+  \item \textbf{Evidence as a by-product.} Lead time, change-failure rate and restore time are
+        derivable from build records and the ledger rather than estimated -\ the
+        measurement discipline the DORA research associates with higher delivery
+        performance~\cite{forsgren2018,dora2024}.
+\end{itemize}
+
+\section{Future Scope}
+
+\begin{itemize}
+  \item \textbf{Transport and perimeter.} A TLS-terminating reverse proxy with automated
+        certificate renewal, HSTS, and a host firewall, which together allow the session cookie to
+        become \texttt{Secure}.
+  \item \textbf{Supply-chain assurance.} An SBOM per image, signing with Sigstore/cosign, SLSA
+        provenance attestation, digest-pinned base images, and a vulnerability gate that fails the
+        build on fixable critical findings~\cite{slsa,nist800190}.
+  \item \textbf{Zero-downtime release.} Blue-green on a single host via two Compose projects
+        behind the proxy~\cite{fowlerbg}, with expand-and-contract migrations so a rollback never
+        meets a schema it cannot read -\ the one gap that makes the current rollback a
+        last resort rather than a routine.
+  \item \textbf{Rehearsed recovery.} Backup retention, an off-host copy, and a scheduled restore
+        drill run as a pipeline job; until a restore has been performed, a backup is a hypothesis.
+  \item \textbf{Observability and metrics.} OpenTelemetry traces and Prometheus metrics behind
+        the existing request-identifier correlation seam, plus explicit DORA
+        instrumentation~\cite{dora2024}.
+  \item \textbf{Policy and architecture enforcement.} Static policy checks on the composition and
+        playbooks, and dependency-direction tests promoting the package rules from prose into a
+        failing build.
+  \item \textbf{A justified scale-out path.} Should multiple instances become warranted,
+        object storage replaces the upload volume and an orchestrator replaces Compose
+        -\ a change that supersedes recorded architecture decisions rather than
+        silently diverging from them.
+\end{itemize}
+
+\section{Conclusion}
+
+The application in this project is small by design; the delivery path is the engineering. By
+insisting that one artefact is built once, proven against the engine it will actually run on,
+named by an immutable tag it can assert about itself, deployed behind a gate that protects both
+halves of its state, and reversible to a version a ledger records as stable, the pipeline turns
+deployment from an event that is survived into a procedure that is repeated. The design is
+complete and documented; the work that remains is the work this paper refuses to skip over
+-\ executing it, and keeping the transcript.
+
+\section{References}
+{\fontsize{8.6}{10.3}\selectfont
+\begin{thebibliography}{99}
+\setlength{\itemsep}{1.5pt}\setlength{\parskip}{0pt}
+
+\bibitem{humble2010} J. Humble and D. Farley, \textit{Continuous Delivery: Reliable Software
+Releases through Build, Test, and Deployment Automation}. Boston, MA, USA: Addison-Wesley, 2010.
+
+\bibitem{forsgren2018} N. Forsgren, J. Humble, and G. Kim, \textit{Accelerate: The Science of
+Lean Software and DevOps}. Portland, OR, USA: IT Revolution Press, 2018.
+
+\bibitem{shahin2017} M. Shahin, M. A. Babar, and L. Zhu, ``Continuous integration, delivery and
+deployment: A systematic review on approaches, tools, challenges and practices,''
+\textit{IEEE Access}, vol. 5, pp. 3909--3943, 2017.
+
+\bibitem{chen2015} L. Chen, ``Continuous delivery: Huge benefits, but challenges too,''
+\textit{IEEE Software}, vol. 32, no. 2, pp. 50--54, Mar./Apr. 2015.
+
+\bibitem{fowlerci} M. Fowler, ``Continuous integration,'' martinfowler.com. [Online]. Available:
+\url{https://martinfowler.com/articles/continuousIntegration.html}
+
+\bibitem{fowlerbg} M. Fowler, ``BlueGreenDeployment,'' martinfowler.com. [Online]. Available:
+\url{https://martinfowler.com/bliki/BlueGreenDeployment.html}
+
+\bibitem{dora2024} DORA, ``Accelerate State of DevOps Report,'' Google Cloud / DORA research
+program. [Online]. Available: \url{https://dora.dev/research/}
+
+\bibitem{jenkins} Jenkins Project, ``Pipeline -\ Jenkins user documentation.''
+[Online]. Available: \url{https://www.jenkins.io/doc/book/pipeline/}
+
+\bibitem{maven} Apache Maven Project, ``Introduction to the build lifecycle.'' [Online].
+Available: \url{https://maven.apache.org/guides/introduction/introduction-to-the-lifecycle.html}
+
+\bibitem{testcontainers} Testcontainers, ``Testcontainers for Java -\ documentation.''
+[Online]. Available: \url{https://java.testcontainers.org/}
+
+\bibitem{selenium} Selenium Project, ``WebDriver -\ Selenium documentation.''
+[Online]. Available: \url{https://www.selenium.dev/documentation/webdriver/}
+
+\bibitem{dockermulti} Docker Inc., ``Multi-stage builds -\ Docker Docs.'' [Online].
+Available: \url{https://docs.docker.com/build/building/multi-stage/}
+
+\bibitem{ociimage} Open Container Initiative, ``OCI image format specification.'' [Online].
+Available: \url{https://github.com/opencontainers/image-spec}
+
+\bibitem{ansible} Red Hat, ``Ansible documentation -\ tips and tricks.'' [Online].
+Available: \url{https://docs.ansible.com/ansible/latest/tips_tricks/index.html}
+
+\bibitem{flyway} Redgate, ``Flyway documentation -\ migrations.'' [Online]. Available:
+\url{https://documentation.red-gate.com/flyway}
+
+\bibitem{springboot} Spring, ``Spring Boot reference documentation -\ production-ready
+features (Actuator).'' [Online]. Available:
+\url{https://docs.spring.io/spring-boot/reference/actuator/index.html}
+
+\bibitem{nist800190} M. Souppaya, J. Morello, and K. Scarfone, ``Application container security
+guide,'' National Institute of Standards and Technology, Gaithersburg, MD, USA,
+NIST SP 800-190, Sep. 2017.
+
+\bibitem{owasp2021} OWASP Foundation, ``OWASP Top 10:2021.'' [Online]. Available:
+\url{https://owasp.org/Top10/}
+
+\bibitem{semver} T. Preston-Werner, ``Semantic versioning 2.0.0.'' [Online]. Available:
+\url{https://semver.org/}
+
+\bibitem{convcommits} Conventional Commits, ``Conventional Commits 1.0.0.'' [Online]. Available:
+\url{https://www.conventionalcommits.org/en/v1.0.0/}
+
+\bibitem{slsa} Open Source Security Foundation, ``SLSA: Supply-chain Levels for Software
+Artifacts, specification v1.0.'' [Online]. Available: \url{https://slsa.dev/spec/v1.0/}
+
+\end{thebibliography}}
+
+\end{document}
