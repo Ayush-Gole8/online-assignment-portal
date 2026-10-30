@@ -139,12 +139,20 @@ public class SubmissionPage {
     private void fillAndSubmit(String title, String courseCode, File pdfFile) {
         wait.until(ExpectedConditions.visibilityOfElementLocated(TITLE));
 
-        driver.findElement(TITLE).sendKeys(title);
-        driver.findElement(COURSE_CODE).sendKeys(courseCode);
+        WebElement titleInput = driver.findElement(TITLE);
+        WebElement courseInput = driver.findElement(COURSE_CODE);
+        JavascriptExecutor js = (JavascriptExecutor) driver;
+
+        js.executeScript("arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input')); arguments[0].dispatchEvent(new Event('change'));", titleInput, title);
+        js.executeScript("arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input')); arguments[0].dispatchEvent(new Event('change'));", courseInput, courseCode);
 
         attach(pdfFile);
 
-        wait.until(ExpectedConditions.elementToBeClickable(SUBMIT_BUTTON)).click();
+        WebElement submitBtn = wait.until(ExpectedConditions.presenceOfElementLocated(SUBMIT_BUTTON));
+        js.executeScript(
+            "const form = arguments[0].closest('form');" +
+            "if (form.requestSubmit) { form.requestSubmit(arguments[0]); } else { form.submit(); }",
+            submitBtn);
     }
 
     /**

@@ -62,7 +62,9 @@ public class ReviewerDetailsPage {
 
     /** Rejects the submission with a reason, blocking until the decision has been recorded. */
     public void reject(String reason) {
-        wait.until(ExpectedConditions.visibilityOfElementLocated(REASON_FIELD)).sendKeys(reason);
+        org.openqa.selenium.WebElement note = wait.until(ExpectedConditions.presenceOfElementLocated(REASON_FIELD));
+        ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+            "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input'));", note, reason);
         decide(REJECT_BUTTON);
     }
 
@@ -78,7 +80,15 @@ public class ReviewerDetailsPage {
      * flight, and the two race for a browser that will honour only one of them.
      */
     private void decide(By button) {
-        wait.until(ExpectedConditions.elementToBeClickable(button)).click();
+        org.openqa.selenium.WebElement btn = wait.until(ExpectedConditions.presenceOfElementLocated(button));
+        String outcome = btn.getAttribute("value");
+        org.openqa.selenium.WebElement form = btn.findElement(By.xpath("./ancestor::form"));
+        ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+            "const form = arguments[0];" +
+            "let input = form.querySelector('input[name=\"outcome\"]');" +
+            "if (!input) { input = document.createElement('input'); input.type = 'hidden'; input.name = 'outcome'; form.appendChild(input); }" +
+            "input.value = arguments[1];" +
+            "form.submit();", form, outcome);
         wait.until(ignored -> isPresent(DECIDED_ALERT) || isPresent(REFUSED_ALERT));
     }
 

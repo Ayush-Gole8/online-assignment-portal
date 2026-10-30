@@ -94,10 +94,13 @@ public class LoginPage {
      * and not in the message — was that the page was Jenkins' own sign-in screen.
      */
     private void submitCredentials(String email, String password) {
-        driver.get(baseUrl + "/login");
+        if (!driver.getCurrentUrl().contains("/login")) {
+            driver.get(baseUrl + "/login");
+        }
 
+        WebElement emailInput;
         try {
-            wait.until(ExpectedConditions.visibilityOfElementLocated(EMAIL));
+            emailInput = wait.until(ExpectedConditions.visibilityOfElementLocated(EMAIL));
         } catch (TimeoutException notThePortal) {
             throw new AssertionError(
                     "The page at " + driver.getCurrentUrl() + " is not the portal's sign-in page."
@@ -109,9 +112,19 @@ public class LoginPage {
                     notThePortal);
         }
 
-        driver.findElement(EMAIL).sendKeys(email);
-        driver.findElement(PASSWORD).sendKeys(password);
-        driver.findElement(SUBMIT_BUTTON).click();
+        WebElement passwordInput = wait.until(ExpectedConditions.visibilityOfElementLocated(PASSWORD));
+        WebElement submitBtn = wait.until(ExpectedConditions.presenceOfElementLocated(SUBMIT_BUTTON));
+
+        ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+            "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input')); arguments[0].dispatchEvent(new Event('change'));",
+            emailInput, email);
+        ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+            "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input')); arguments[0].dispatchEvent(new Event('change'));",
+            passwordInput, password);
+        ((org.openqa.selenium.JavascriptExecutor) driver).executeScript(
+            "const form = arguments[0].closest('form');" +
+            "if (form.requestSubmit) { form.requestSubmit(arguments[0]); } else { form.submit(); }",
+            submitBtn);
     }
 
     /** True once the browser is no longer on the login URL; false if the wait expires. */

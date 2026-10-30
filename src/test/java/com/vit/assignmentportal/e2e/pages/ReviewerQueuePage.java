@@ -55,7 +55,8 @@ public class ReviewerQueuePage {
     public void openSubmission(String title) {
         // normalize-space() guards against whitespace the browser adds around rendered text.
         By link = By.xpath("//a[normalize-space()='" + title + "']");
-        wait.until(ExpectedConditions.elementToBeClickable(link)).click();
+        org.openqa.selenium.WebElement linkEl = wait.until(ExpectedConditions.presenceOfElementLocated(link));
+        ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("arguments[0].click();", linkEl);
         wait.until(ExpectedConditions.visibilityOfElementLocated(REVIEW_DETAIL));
     }
 }

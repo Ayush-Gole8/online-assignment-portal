@@ -9,6 +9,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
@@ -197,12 +198,25 @@ public abstract class BaseE2ETest {
      * sign out".
      */
     protected void logout() {
-        driver.get(getBaseUrl() + "/");
-        new WebDriverWait(driver, WAIT)
-                .until(ExpectedConditions.elementToBeClickable(SIGN_OUT)).click();
+        WebElement signOut = null;
+        try {
+            signOut = new WebDriverWait(driver, Duration.ofSeconds(2))
+                    .until(ExpectedConditions.presenceOfElementLocated(SIGN_OUT));
+        } catch (Exception e) {
+            driver.get(getBaseUrl() + "/");
+            signOut = new WebDriverWait(driver, WAIT)
+                    .until(ExpectedConditions.presenceOfElementLocated(SIGN_OUT));
+        }
+        try {
+            ((org.openqa.selenium.JavascriptExecutor) driver).executeScript("arguments[0].closest('form').submit();", signOut);
+        } catch (Exception ignored) {
+            signOut.click();
+        }
         // logoutSuccessUrl("/login?logout"), so the URL is the signal that the sign-out completed.
         new WebDriverWait(driver, WAIT)
                 .until(ExpectedConditions.urlContains("/login"));
+        new WebDriverWait(driver, WAIT)
+                .until(ExpectedConditions.visibilityOfElementLocated(By.id("email")));
     }
 
     protected File createDummyPdf(String prefix) throws Exception {

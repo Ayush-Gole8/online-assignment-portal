@@ -39,6 +39,9 @@ class StudentWorkflowE2E extends BaseE2ETest {
     void studentCannotSubmitInvalidFile() throws Exception {
         new LoginPage(driver, getBaseUrl()).loginAs(STUDENT_EMAIL, PASSWORD);
 
+        driver.get(getBaseUrl() + "/student/dashboard");
+        assertThat(new StudentDashboardPage(driver).isLoaded()).isTrue();
+
         new StudentDashboardPage(driver).navigateToUpload(getBaseUrl());
 
         // The file has a .pdf extension (so Chrome's accept= attribute passes it) and plain-text
