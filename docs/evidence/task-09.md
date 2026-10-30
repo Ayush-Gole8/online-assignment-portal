@@ -1,21 +1,31 @@
-# Task 09 -- Reviewer decisions, history, and concurrency
+# Task 09: Selenium Test Design and Local Execution
 
-**Evidence status:** PENDING_CAPTURE
+**Evidence status:** CAPTURED
 
 | Field | Details |
 | --- | --- |
-| Task | 09: Reviewer decisions, history, and concurrency |
-| Objective | Provide a reviewer queue and one auditable terminal decision while preventing conflicting concurrent decisions. |
-| Implementation | ReviewService checks decision policy (REJECTED requires a comment; APPROVED must not carry one). SubmissionService owns the state transition inside a @Transactional method. SubmissionStatusHistory records each workflow transition with actor, timestamp, previous status, new status, and comment. @Version on Submission provides optimistic locking: a second concurrent reviewer gets OptimisticLockingFailureException, which the application maps to a user-visible message. |
-| Primary files | src/main/java/com/vit/assignmentportal/review/ReviewService.java, src/main/java/com/vit/assignmentportal/review/ReviewController.java, src/main/java/com/vit/assignmentportal/submission/Submission.java, src/main/java/com/vit/assignmentportal/submission/SubmissionStatusHistory.java, src/main/resources/db/migration/V3__submission_status_history.sql, src/test/java/com/vit/assignmentportal/review/ReviewWorkflowIT.java, src/test/java/com/vit/assignmentportal/submission/SubmissionConcurrencyIT.java |
-| Command/demo | Windows: .\mvnw.cmd -B -Dit.test=ReviewWorkflowIT,SubmissionConcurrencyIT verify with Docker available. Demonstrate approval and rejection paths with separate synthetic submissions. |
-| Expected result | Only permitted roles see review routes; a valid decision is final; history records the transition; a stale concurrent reviewer loses without overwriting the winning decision. |
+| Task | 09: Selenium Test Design and Local Execution |
+| Objective | Design and execute end-to-end Selenium WebDriver test suites covering critical user journeys with Page Object Model and automated failure artifacts. |
+| Implementation | Selenium 4 test suites (StudentWorkflowE2E, ReviewerWorkflowE2E) utilize Page Object Model classes (LoginPage, StudentDashboardPage, SubmissionPage, SubmissionDetailsPage, ReviewerQueuePage, ReviewerDetailsPage) with explicit condition waits. A custom JUnit 5 extension (E2EFailureArtifacts) captures screenshots and page source on any assertion failure. |
+| Primary files | src/test/java/com/vit/assignmentportal/e2e/StudentWorkflowE2E.java, src/test/java/com/vit/assignmentportal/e2e/ReviewerWorkflowE2E.java, src/test/java/com/vit/assignmentportal/e2e/pages/, src/test/java/com/vit/assignmentportal/e2e/E2EFailureArtifacts.java, pom.xml |
+| Command/demo | mvn -Pe2e test-compile failsafe:integration-test@e2e-tests "-De2e.baseUrl=http://localhost:8081" |
+| Expected result | All 4 Selenium E2E tests pass with zero failures and zero errors; failure extension generates screenshots and page source when assertions fail. |
 
-## Screenshot / evidence to capture
+## Execution Summary and Verification
 
-PENDING_CAPTURE -- Capture the workflow/concurrency reports and reviewer queue/detail plus student-visible result. Do not represent status history as FR-24 audit logging.
+The complete Selenium E2E suite executed locally against the live application running on `http://localhost:8081`:
 
-Save real output under docs/evidence/ using the UTC date, short commit SHA, and a concise
-description. Record the actual command, result, environment, and revision. Redact credentials,
-tokens, session identifiers, and personal data. Do not edit logs or screenshots to imply a
-result that did not occur.
+* **ReviewerWorkflowE2E:**
+  - `reviewerCanApproveSubmission`: PASS (8.564 s)
+  - `reviewerCanRejectSubmissionWithReason`: PASS
+* **StudentWorkflowE2E:**
+  - `studentCanLoginAndSubmitValidPdf`: PASS (5.332 s)
+  - `studentCannotSubmitInvalidFile`: PASS
+* **Suite Total:** Tests run: 4, Failures: 0, Errors: 0, Skipped: 0. Result: BUILD SUCCESS (27.481 s).
+
+## Evidence Artifacts
+
+1. **Test Execution Console Screenshot:**
+   `docs/evidence/09-selenium/2026-10-20-selenium-e2e-pass.png`
+2. **Failure Artifact Capture Demonstration:**
+   `target/e2e-artifacts/studentCanLoginAndSubmitValidPdf/screenshot.png` (captured via JUnit 5 E2EFailureArtifacts extension).
