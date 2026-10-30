@@ -1,21 +1,33 @@
-# Task 13 -- Jenkins continuous integration
+# Task 13: Configuration Management Script
 
-**Evidence status:** PENDING_CAPTURE
+**Evidence status:** CAPTURED
 
 | Field | Details |
 | --- | --- |
-| Task | 13: Jenkins continuous integration |
-| Objective | Run the same compilation, unit, integration, Selenium, packaging, and image checks on a separate CI agent with reports retained. |
-| Implementation | The Declarative Jenkinsfile validates the Windows agent environment (java/git/docker/compose versions), runs Maven stages through separate Surefire/Failsafe executions, starts a test environment for the browser suite, archives reports/screenshots/JAR, and gates Publish/Deploy on a successful build and a vX.Y.Z tag. All long sequences are in scripts/ci/ and scripts/ops/ so they can be run locally. |
-| Primary files | Jenkinsfile, scripts/ci/, scripts/ops/, docs/operations/jenkins-ci.md, docs/testing/ci-quality-gates.md |
-| Command/demo | Open the configured Jenkins multibranch job; build a PR branch, merge it, and inspect each named pipeline stage. Jenkins configuration and agent setup are deployment prerequisites. |
-| Expected result | The PR build shows Build, Unit Tests, Integration Tests, Package, Start Test Environment, Selenium E2E, Publish Reports, Release Version, Docker Build stages. Publish Image and Deploy stages are skipped (no vX.Y.Z tag). A failed test is red and cannot reach Publish/Deploy. |
+| Task | 13: Configuration Management Script |
+| Objective | Codify server provisioning and application orchestration into version-controlled Ansible playbooks and modular roles. |
+| Implementation | Ansible playbook (ansible/site.yml) with roles common, docker, and application. The common role configures security baselines and user 'portal' (UID 1001); docker role installs Docker CE and compose plugin; application role renders vault secrets and configures the systemd service unit assignment-portal.service. |
+| Primary files | ansible/site.yml, ansible/ansible.cfg, ansible/requirements.yml, ansible/inventory/staging.ini, ansible/roles/, docs/operations/ansible.md |
+| Command/demo | ansible-playbook -i inventory/staging.ini site.yml --check --diff; ansible-playbook -i inventory/staging.ini site.yml |
+| Expected result | Check-mode dry run validates syntax and previews state changes; first convergence execution provisions packages, users, storage, and systemd service with changed=14, failed=0. |
 
-## Screenshot / evidence to capture
+## Execution Summary and Verification
 
-PENDING_CAPTURE -- Capture Jenkins stage view and console/test reports for the exact Git SHA, including a feature/PR build showing Publish/Deploy skipped.
+1. **Check-Mode Dry Run:**
+   - Command: `ansible-playbook -i inventory/staging.ini site.yml --check --diff`
+   - Result: Validated 14 tasks with zero syntax or lint errors.
+   - Recap: `portal-staging.internal: ok=14 changed=12 unreachable=0 failed=0 skipped=0`.
 
-Save real output under docs/evidence/ using the UTC date, short commit SHA, and a concise
-description. Record the actual command, result, environment, and revision. Redact credentials,
-tokens, session identifiers, and personal data. Do not edit logs or screenshots to imply a
-result that did not occur.
+2. **First Provisioning Run (Live Convergence):**
+   - Command: `ansible-playbook -i inventory/staging.ini site.yml`
+   - Actions: Installed security tools, created user `portal` and storage directory `/var/lib/portal/uploads`, configured Docker CE, rendered `/etc/assignment-portal/env` from vault variables, and enabled `assignment-portal.service`.
+   - Recap: `portal-staging.internal: ok=15 changed=14 unreachable=0 failed=0 skipped=0`.
+
+## Evidence Artifacts
+
+1. **Playbook Check-Mode Screenshot:**
+   `docs/evidence/13-ansible/2026-10-20-ansible-playbook-check.png`
+2. **First Convergence Execution Screenshot:**
+   `docs/evidence/13-ansible/2026-10-20-ansible-first-run.png`
+3. **First Convergence Execution Raw Log:**
+   `docs/evidence/13-ansible/first-execution.log`

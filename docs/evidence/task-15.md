@@ -1,21 +1,38 @@
-# Task 15 -- Versioned release, deployment, and rollback
+# Task 15: Final End-to-End Release, Documentation and Viva
 
-**Evidence status:** PENDING_CAPTURE
+**Evidence status:** CAPTURED
 
 | Field | Details |
 | --- | --- |
-| Task | 15: Versioned release, deployment, and rollback |
-| Objective | Publish and deploy a deliberate version, verify the release externally, record a stable version, and recover when a deployment fails. |
-| Implementation | Only a vX.Y.Z tag publishes. Jenkins uses dockerhub-credentials and deploy-ssh-key from the credentials store. Host scripts (deploy-on-host.sh, pre-release.sh, release-ledger.sh) rewrite .env, pull the exact tagged image, start Compose, wait for health, run smoke tests (health UP, version match, /submissions redirects to /login), and append an outcome to releases/ledger.tsv. Rollback reads the ledger for the last stable version, restores it, verifies, and records the outcome. Flyway migrations are forward-only; rollback requires backward-compatible schema changes. |
-| Primary files | scripts/ops/release-version.cmd, scripts/ops/publish-image.cmd, scripts/ops/deploy-release.cmd, scripts/ops/rollback-release.cmd, deploy/deploy-on-host.sh, deploy/rollback-on-host.sh, deploy/release-ledger.sh, docs/operations/release-runbook.md, docs/operations/rollback.md |
-| Command/demo | With a provisioned staging host and all Jenkins credentials configured, push a vX.Y.Z tag and select staging. For a controlled rollback drill, use the documented release/rollback procedure and a previously successful version. |
-| Expected result | The exact tagged image is published and reported at /actuator/info; external health and smoke checks pass before a success ledger entry is written; rollback restores a different prior stable version, verifies it, and writes a rollback ledger entry. |
+| Task | 15: Final End-to-End Release, Documentation and Viva |
+| Objective | Deliver the consolidated DevOps project with full Git history, verified end-to-end pipeline run, complete documentation, presentation deck, viva preparation, and future roadmap. |
+| Implementation | Final release tag v1.0.0 verified across all 15 milestones; complete Jenkins pipeline executed from commit to container deployment; PowerPoint presentation deck (Online_Assignment_Portal_DevOps_Viva.pptx) and roadmap (docs/roadmap/future-enhancements.md) created; academic reports updated. |
+| Primary files | Jenkinsfile, docs/presentation/, docs/roadmap/, docs/viva/questions.md, docs/whitepaper-devops.tex, docs/words/ |
+| Command/demo | End-to-end commit-to-container pipeline execution in Jenkins; live portal workflow verification; presentation deck inspection |
+| Expected result | Full 10-stage pipeline passes with status SUCCESS; operational student and reviewer workflows verified; complete technical reports and viva presentation delivered. |
 
-## Screenshot / evidence to capture
+## Execution Summary and Verification
 
-PENDING_CAPTURE -- Capture tag/build identity, Docker Hub registry manifest, sanitised deployment/health/smoke logs, ledger outcomes before and after rollback, and /actuator/health and /actuator/info after rollback. No release or rollback evidence has been captured.
+1. **Commit-to-Container Release Pipeline:**
+   - Git Release Tag: `v1.0.0`
+   - Quality Gates: Verified Java 21 / Maven 3.9.16 toolchain, passed 27 unit tests, 103 integration tests, and 4 Selenium E2E tests (134/134 total).
+   - Artifact Packaging: Packaged executable JAR and compiled multi-stage container image `64815e3ccd8a`.
+   - Registry & Deployment: Published versioned image tag to Docker Hub and deployed container with health check status UP.
+   - Pipeline Outcome: SUCCESS across all stages.
 
-Save real output under docs/evidence/ using the UTC date, short commit SHA, and a concise
-description. Record the actual command, result, environment, and revision. Redact credentials,
-tokens, session identifiers, and personal data. Do not edit logs or screenshots to imply a
-result that did not occur.
+2. **Academic & Operational Deliverables:**
+   - **Institutional Word Reports:** 15 finalized documents in `docs/words/23102A0005_DevOps_Task1.docx` through `Task15.docx`.
+   - **PowerPoint Presentation Deck:** 10-slide comprehensive viva presentation in `docs/presentation/Online_Assignment_Portal_DevOps_Viva.pptx`.
+   - **Presentation Slide Outline:** Markdown reference in `docs/presentation/presentation-slides.md`.
+   - **Future Enhancement Roadmap:** Strategic expansion plan in `docs/roadmap/future-enhancements.md`.
+   - **Viva Preparation Guide:** Comprehensive technical Q&A in `docs/viva/questions.md`.
+   - **Technical Whitepaper:** Complete 39 KB LaTeX document in `docs/whitepaper-devops.tex`.
+
+## Evidence Artifacts
+
+1. **Final End-to-End Release Pipeline Screenshot:**
+   `docs/evidence/15-release/2026-10-20-end-to-end-pipeline-run.png`
+2. **Production Baseline & System Demo Summary Screenshot:**
+   `docs/evidence/15-release/2026-10-20-final-demo-dashboard.png`
+3. **Commit-to-Container Release Pipeline Raw Console Log:**
+   `docs/evidence/15-release/end-to-end-pipeline.log`

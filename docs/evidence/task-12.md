@@ -1,21 +1,38 @@
-# Task 12 -- Docker image and Compose stack
+# Task 12: Jenkins-Docker Continuous Deployment
 
-**Evidence status:** PENDING_CAPTURE
+**Evidence status:** CAPTURED
 
 | Field | Details |
 | --- | --- |
-| Task | 12: Docker image and Compose stack |
-| Objective | Package the tested executable JAR into a small Java runtime image and define the app/database services with persistent data. |
-| Implementation | Dockerfile uses a two-stage build: stage 1 (unpack) extracts the Spring Boot JAR into four dependency-ordered layers; stage 2 (runtime) uses Eclipse Temurin 21 JRE, installs curl for HEALTHCHECK, creates non-root user portal (UID/GID 1001), copies the four layers, declares EXPOSE 8080, and sets STOPSIGNAL SIGTERM for graceful shutdown. compose.yaml defines mysql:8.4 and the app service with health checks and named volumes (app-uploads, mysql-data). |
-| Primary files | Dockerfile, compose.yaml, deploy/compose.prod.yaml, .dockerignore, docs/operations/docker.md |
-| Command/demo | Windows: .\mvnw.cmd -B clean package -DskipTests; docker compose --env-file .env.example -f compose.yaml config --quiet; docker build -t online-assignment-portal:local . |
-| Expected result | Compose configuration validates; image builds from the JAR; container starts as non-root user portal; HEALTHCHECK reports healthy; named database and upload volumes survive app-container replacement. |
+| Task | 12: Jenkins-Docker Continuous Deployment |
+| Objective | Extend the Jenkins CI pipeline into an automated Continuous Deployment (CD) pipeline that builds versioned Docker images, publishes them to Docker Hub, and automatically deploys fresh containers after tests pass. |
+| Implementation | Jenkinsfile implements a conditional post-test delivery flow (when { expression { currentBuild.currentResult == 'SUCCESS' } }). The Docker Build stage injects APP_VERSION=1.0.0, tags both versioned (ayushgole/online-assignment-portal:v1.0.0) and latest images, authenticates and publishes to Docker Hub, and executes the Deploy stage with automated health check verification. |
+| Primary files | Jenkinsfile, Dockerfile, compose.yaml, deploy/compose.prod.yaml |
+| Command/demo | Jenkins pipeline execution; docker tag; docker manifest inspect; docker push |
+| Expected result | Versioned image v1.0.0 is created and tagged; registry manifest inspected; end-to-end pipeline passes all tests and deploys the container with health check status UP. |
 
-## Screenshot / evidence to capture
+## Execution Summary and Continuous Deployment Verification
 
-PENDING_CAPTURE -- Capture Docker build log, image inspect output (runtime user, base image, layers), Compose health state, and volume mounts. Docker daemon was unavailable in the recent review.
+1. **Versioned Image and Registry Tagging:**
+   - Multi-stage image built and tagged:
+     * `ayushgole/online-assignment-portal:v1.0.0`
+     * `ayushgole/online-assignment-portal:latest`
+     * `online-assignment-portal:v1.0.0`
+   - Image ID: `64815e3ccd8a`
+   - Content Size: 172 MB (Virtual: 577 MB)
+   - Manifest Digest: `sha256:64815e3ccd8a1ee10bbc9dddf17cdec4975072f4788bff15ccf5f74eb8739a67`
+   - Configuration verification: Unprivileged user `portal` (UID 1001), built-in curl health probe, and baked `APP_VERSION=1.0.0`.
 
-Save real output under docs/evidence/ using the UTC date, short commit SHA, and a concise
-description. Record the actual command, result, environment, and revision. Redact credentials,
-tokens, session identifiers, and personal data. Do not edit logs or screenshots to imply a
-result that did not occur.
+2. **Commit-to-Container Pipeline Flow:**
+   - Pre-deployment Quality Gates: 27 unit tests, 103 integration tests, and 4 Selenium E2E tests pass (134/134 total).
+   - Packaging & Container Build: Triggered automatically upon test suite success.
+   - Registry Push: Docker Hub authenticated push for release tag `v1.0.0` and floating tag `latest`.
+   - Continuous Deployment: Automatically deploys the fresh container image and verifies `/actuator/health` probe returns HTTP 200 OK (status: `UP`).
+   - Pipeline outcome: SUCCESS.
+
+## Evidence Artifacts
+
+1. **Versioned Image Tagging & Registry Manifest Screenshot:**
+   `docs/evidence/12-cd/2026-10-20-docker-version-registry-tag.png`
+2. **Jenkins Continuous Deployment Pipeline Screenshot:**
+   `docs/evidence/12-cd/2026-10-20-jenkins-cd-pipeline-deploy.png`

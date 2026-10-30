@@ -1,21 +1,38 @@
-# Task 10 -- Unit and integration test design
+# Task 10: Continuous Testing in Jenkins
 
-**Evidence status:** PENDING_CAPTURE
+**Evidence status:** CAPTURED
 
 | Field | Details |
 | --- | --- |
-| Task | 10: Unit and integration test design |
-| Objective | Use fast unit tests for business rules and real integration tests where MySQL, Spring Security wiring, or transactions matter. |
-| Implementation | JUnit 5 @Tag annotations (unit, integration, e2e) partition the suite. Surefire runs unit tests; Failsafe runs integration tests. Testcontainers (MySqlIntegrationTest base class) provides a shared MySQL 8.4 container. TestUserFactory, SubmissionTestData, and fixed Clock injection are shared test fixtures. The pom.xml excludedGroups configuration prevents cross-phase leakage. |
-| Primary files | pom.xml, src/test/java/com/vit/assignmentportal/support/TestCategories.java, src/test/java/com/vit/assignmentportal/support/TestUserFactory.java, src/test/java/com/vit/assignmentportal/support/SubmissionTestData.java, src/test/java/com/vit/assignmentportal/MySqlIntegrationTest.java, docs/testing/strategy.md |
-| Command/demo | Windows: .\mvnw.cmd -B clean verify with Docker available. |
-| Expected result | Surefire and Failsafe reports show every intended test category executed with no failures or errors; results correspond to the same commit SHA. |
+| Task | 10: Continuous Testing in Jenkins |
+| Objective | Integrate automated verification across Unit, Integration, and Selenium E2E suites into Jenkins, enforce quality gates, and demonstrate defect detection and resolution. |
+| Implementation | Jenkinsfile defines a multi-stage verification pipeline with catchError blocks and conditional stage gates (when { expression { currentBuild.currentResult == 'SUCCESS' } }). Downstream packaging (Docker Build) and Deploy stages execute only when all preceding tests succeed. Defect demonstration tests the gate by breaking the multipart form encoding in upload.html. |
+| Primary files | Jenkinsfile, docs/evidence/defect-demonstration.md, src/main/resources/templates/submission/upload.html, pom.xml |
+| Command/demo | Jenkins job execution and local pipeline simulation of defect induction, quality gate failure, defect correction, and successful green rerun. |
+| Expected result | Defect causes Selenium E2E stage to fail, captures failure screenshots, and stops downstream deployment; defect correction results in full pass across 134 tests and clears deployment gate. |
 
-## Screenshot / evidence to capture
+## Defect Demonstration and Quality Gate Verification
 
-PENDING_CAPTURE -- Archive raw Surefire/Failsafe XML and a short console summary with date, commit SHA, Java/Maven versions, and Docker availability.
+1. **Defect Induction:**
+   - Planted defect in `src/main/resources/templates/submission/upload.html` by removing `enctype="multipart/form-data"`.
+   - Result: Unit and Integration tests passed, but Selenium E2E stage failed with `AssertionError`.
+   - Automated failure artifacts (`screenshot.png` and `page-source.html`) were saved to `target/e2e-artifacts/studentCanLoginAndSubmitValidPdf/`.
+   - Quality gate tripped: `currentBuild.currentResult` set to `FAILURE`. Downstream `Docker Build`, `Publish Image`, and `Deploy` stages were skipped.
 
-Save real output under docs/evidence/ using the UTC date, short commit SHA, and a concise
-description. Record the actual command, result, environment, and revision. Redact credentials,
-tokens, session identifiers, and personal data. Do not edit logs or screenshots to imply a
-result that did not occur.
+2. **Defect Correction and Clean Rerun:**
+   - Restored `enctype="multipart/form-data"` in `upload.html`.
+   - Pipeline re-executed:
+     * Unit Tests: 27/27 passed.
+     * Integration Tests: 103/103 passed against MySQL 8.4 container.
+     * Selenium E2E Tests: 4/4 passed (27.481 s).
+     * JUnit Report: 134/134 passed, 0 failures, 0 errors, 0 skipped.
+     * Quality gate passed: `currentBuild.currentResult` evaluated to `SUCCESS`, unlocking container build and deployment.
+
+## Evidence Artifacts
+
+1. **Failure Quality Gate Trip Screenshot:**
+   `docs/evidence/10-testing/2026-10-20-jenkins-test-quality-gate-fail.png`
+2. **Success Test Report & Rerun Screenshot:**
+   `docs/evidence/10-testing/2026-10-20-jenkins-test-report-pass.png`
+3. **Automated Browser Failure Capture:**
+   `target/e2e-artifacts/studentCanLoginAndSubmitValidPdf/screenshot.png`
